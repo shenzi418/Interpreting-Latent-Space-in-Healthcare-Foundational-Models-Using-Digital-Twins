@@ -1,0 +1,60 @@
+{
+  "seed": 42,
+  "fold_assignment": {
+    "split_for_fold": {
+      "0": "test",
+      "1": "train",
+      "2": "train",
+      "3": "train",
+      "4": "val"
+    },
+    "test_fold": 0,
+    "val_fold": 4,
+    "train_folds": [
+      1,
+      2,
+      3
+    ]
+  },
+  "splits": {
+    "train": {
+      "num_samples": 9926,
+      "class_positive_counts": {
+        "label_0": 800,
+        "label_1": 4797,
+        "label_2": 798,
+        "label_3": 800,
+        "label_4": 650,
+        "label_5": 631,
+        "label_6": 650,
+        "label_7": 800
+      }
+    },
+    "val": {
+      "num_samples": 2775,
+      "class_positive_counts": {
+        "label_0": 200,
+        "label_1": 1200,
+        "label_2": 200,
+        "label_3": 200,
+        "label_4": 260,
+        "label_5": 255,
+        "label_6": 260,
+        "label_7": 200
+      }
+    },
+    "test": {
+      "num_samples": 4138,
+      "class_positive_counts": {
+        "label_0": 300,
+        "label_1": 1800,
+        "label_2": 300,
+        "label_3": 300,
+        "label_4": 390,
+        "label_5": 358,
+        "label_6": 390,
+        "label_7": 300
+      }
+    }
+  }
+}

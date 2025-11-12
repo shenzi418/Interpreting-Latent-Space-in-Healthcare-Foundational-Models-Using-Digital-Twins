@@ -1,0 +1,7 @@
+# Ignore MedalCare-XL folder
+MedalCare-XL/
+__pycache__/
+outputs/
+checkpoint/
+MedalRaw/
+*.pth
