@@ -1,7 +1,9 @@
 # Ignore MedalCare-XL folder
 MedalCare-XL/
 __pycache__/
-outputs/
+outputs/*
+!outputs/quick_waveform_check/
+!outputs/quick_waveform_check/**
 checkpoint/
 MedalRaw/
 *.pth
