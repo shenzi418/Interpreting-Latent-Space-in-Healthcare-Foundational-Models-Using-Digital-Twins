@@ -1,5 +1,7 @@
 # Ignore MedalCare-XL folder
 MedalCare-XL/
+# Ignore mimic-iv-ecg-demo folder
+mimic-iv-ecg-demo-diagnostic-electrocardiogram-matched-subset-demo-0.1/
 __pycache__/
 outputs/*
 !outputs/quick_waveform_check/

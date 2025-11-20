@@ -67,6 +67,7 @@ All artifacts and scripts live in the repository so that any teammate can re-run
   - Linear head artifacts under `outputs/w1_baselines/linear/`.
   - MLP head artifacts under `outputs/w1_baselines/mlp/`.
 - Both runs surpass zero-shot macro AP by a wide margin and remain numerically stable (no NaNs/Infs).
+- Checkpoints `w45_frozen_linear_best.pt` and `w45_frozen_mlp_best.pt` contain the frozen ECGFounder encoder weights (`first_conv.*`, `stage_list.*`) alongside the MedalCare heads (`dense*` layers), even though no explicit `encoder`/`mlp` prefixes appear in the `state_dict`.
 
 ### 3.6 Optional Domain Alignment 
 - Added RBF-based MMD loss (`losses/mmd.py`) and integrated it into the training loop via `--lambda-mmd` and `--domain-column`.
