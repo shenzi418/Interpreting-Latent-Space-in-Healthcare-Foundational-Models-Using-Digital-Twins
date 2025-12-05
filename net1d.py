@@ -394,6 +394,62 @@ class Net1D(nn.Module):
         else:
             return out
 
+
+class MultiHeadECGFounder(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        base_filters,
+        ratio,
+        filter_list,
+        m_blocks_list,
+        kernel_size,
+        stride,
+        groups_width,
+        use_bn,
+        use_do,
+        n_medal_classes,
+        n_ptb_classes,
+        verbose=False,
+    ):
+        super().__init__()
+        # Shared backbone – force return_features=True
+        self.backbone = Net1D(
+            in_channels=in_channels,
+            base_filters=base_filters,
+            ratio=ratio,
+            filter_list=filter_list,
+            m_blocks_list=m_blocks_list,
+            kernel_size=kernel_size,
+            stride=stride,
+            groups_width=groups_width,
+            n_classes=n_medal_classes,  # placeholder; head is replaced below
+            use_bn=use_bn,
+            use_do=use_do,
+            return_features=True,
+            verbose=verbose,
+        )
+
+        feat_dim = self.backbone.dense.in_features
+        # Optional: self.backbone.dense = nn.Identity()
+        self.head_medal = nn.Linear(feat_dim, n_medal_classes)
+        self.head_ptb = nn.Linear(feat_dim, n_ptb_classes)
+
+    def forward(self, x, task, return_features=False):
+        # Backbone returns (logits, deep_features) when return_features=True
+        _, features = self.backbone(x)
+
+        if task == "medalcare":
+            logits = self.head_medal(features)
+        elif task == "ptbxl":
+            logits = self.head_ptb(features)
+        else:
+            raise ValueError(f"Unknown task '{task}', expected 'medalcare' or 'ptbxl'.")
+
+        if return_features:
+            return logits, features
+        return logits
+
 if __name__ == "__main__":
   model = Net1D(
       in_channels=12, 

@@ -13,6 +13,10 @@ Evaluate on the MedalCare test split using the default foundation checkpoint:
 
 Evaluate on the validation split with an explicit head mapping:
     python scripts/eval_zero_shot.py --split val --head-indices 0,1,2,3,4,5,6,7
+
+Evaluate PTB-XL in zero-shot mode (always uses the original foundation checkpoint):
+    python scripts/eval_zero_shot.py --dataset ptbxl --split test \
+        --ptbxl-root ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3
 """
 
 from __future__ import annotations
@@ -35,17 +39,26 @@ if str(REPO_ROOT) not in sys.path:
 
 import pandas as pd
 
-from medalcare_datasets import LVEF_12lead_cls_Dataset  # pylint: disable=wrong-import-position
 from metrics import AVAILABLE_METRICS, compute_multilabel_metrics  # pylint: disable=wrong-import-position
 from net1d import Net1D  # pylint: disable=wrong-import-position
+from scripts.datasets import PTBXLDataset, get_dataset  # pylint: disable=wrong-import-position
 
 
 DEFAULT_MANIFEST = REPO_ROOT / "MedalRaw" / "medalcare_filtered_manifest.csv"
 DEFAULT_CHECKPOINT = REPO_ROOT / "checkpoint" / "12_lead_ECGFounder.pth"
+DEFAULT_PTBXL_ROOT = REPO_ROOT / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
+DATASET_CHOICES = ("medalcare", "ptbxl")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Zero-shot evaluation for ECGFounder.")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=DATASET_CHOICES,
+        default="medalcare",
+        help="Which dataset to evaluate (default: medalcare).",
+    )
     parser.add_argument(
         "--checkpoint",
         type=Path,
@@ -56,7 +69,16 @@ def parse_args() -> argparse.Namespace:
         "--manifest",
         type=Path,
         default=DEFAULT_MANIFEST,
-        help=f"Path to manifest CSV with WFDB paths (default: {DEFAULT_MANIFEST})",
+        help=f"Path to MedalCare manifest CSV with WFDB paths (default: {DEFAULT_MANIFEST}).",
+    )
+    parser.add_argument(
+        "--ptbxl-root",
+        type=Path,
+        default=DEFAULT_PTBXL_ROOT,
+        help=(
+            "Root directory for the PTB-XL dataset "
+            f"(default: {DEFAULT_PTBXL_ROOT}). Only used when --dataset=ptbxl."
+        ),
     )
     parser.add_argument(
         "--split",
@@ -128,15 +150,80 @@ def filter_split(df, split: str):
     return subset
 
 
-def build_dataloader(df, batch_size: int, num_workers: int) -> DataLoader:
-    dataset = LVEF_12lead_cls_Dataset(ecg_path="", labels_df=df.reset_index(drop=True))
-    return DataLoader(
+def build_medalcare_loader(
+    manifest_path: Path,
+    split: str,
+    batch_size: int,
+    num_workers: int,
+) -> tuple[DataLoader, list[str], dict]:
+    manifest_df = load_manifest(manifest_path)
+    split_df = filter_split(manifest_df, split)
+    label_columns = [col for col in split_df.columns if col.startswith("label_")]
+    if not label_columns:
+        raise ValueError("Manifest must contain label columns named label_0 ... label_n.")
+
+    dataset_df = split_df[["wfdb_path"] + label_columns].copy()
+    dataset = get_dataset("medalcare", ecg_path="", labels_df=dataset_df)
+    loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
     )
+    meta = {
+        "manifest": str(manifest_path),
+        "num_samples": int(len(split_df)),
+        "split": split,
+    }
+    return loader, label_columns, meta
+
+
+def build_ptbxl_loader(
+    root: Path,
+    split: str,
+    batch_size: int,
+    num_workers: int,
+) -> tuple[DataLoader, list[str], dict]:
+    if not root.exists():
+        raise FileNotFoundError(f"PTB-XL root not found: {root}")
+    dataset = get_dataset(
+        "ptbxl",
+        root=root,
+        split=split,
+        sampling_rate=500,
+        signal_duration=10.0,
+        use_high_res=True,
+        return_metadata=False,
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(),
+    )
+    meta = {
+        "ptbxl_root": str(root),
+        "num_samples": int(len(dataset)),
+        "split": split,
+    }
+    label_names = list(PTBXLDataset.SUPERCLASS_LABELS)
+    return loader, label_names, meta
+
+
+def enforce_ptbxl_checkpoint(requested: Path) -> Path:
+    default_resolved = DEFAULT_CHECKPOINT.resolve()
+    try:
+        requested_resolved = requested.resolve()
+    except FileNotFoundError:
+        requested_resolved = requested
+    if requested_resolved != default_resolved:
+        print(
+            "[INFO] Overriding checkpoint "
+            f"'{requested}' with '{DEFAULT_CHECKPOINT}' for PTB-XL zero-shot evaluation."
+        )
+    return DEFAULT_CHECKPOINT
 
 
 def parse_head_indices(arg: Optional[str], expected: int) -> Optional[List[int]]:
@@ -245,18 +332,26 @@ def gather_predictions(
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
-    manifest_df = load_manifest(args.manifest)
-    split_df = filter_split(manifest_df, args.split)
-    label_columns = [col for col in split_df.columns if col.startswith("label_")]
-    if not label_columns:
-        raise ValueError("Manifest must contain label columns named label_0 ... label_n.")
+    if args.dataset == "medalcare":
+        loader, label_names, dataset_meta = build_medalcare_loader(
+            args.manifest, args.split, args.batch_size, args.num_workers
+        )
+        checkpoint_path = args.checkpoint
+    else:
+        loader, label_names, dataset_meta = build_ptbxl_loader(
+            args.ptbxl_root, args.split, args.batch_size, args.num_workers
+        )
+        checkpoint_path = enforce_ptbxl_checkpoint(args.checkpoint)
 
-    dataset_df = split_df[["wfdb_path"] + label_columns].copy()
-    loader = build_dataloader(dataset_df, args.batch_size, args.num_workers)
-    head_indices = parse_head_indices(args.head_indices, len(label_columns))
-    model = load_model(args.checkpoint, len(label_columns), device, head_indices)
+    num_classes = len(label_names)
+    head_indices = parse_head_indices(args.head_indices, num_classes)
+    model = load_model(checkpoint_path, num_classes, device, head_indices)
 
-    print(f"Evaluating on split '{args.split}' with {len(split_df)} records using device {device}.")
+    sample_count = dataset_meta.get("num_samples", len(loader.dataset))
+    print(
+        f"Evaluating dataset '{args.dataset}' split '{args.split}' "
+        f"with {sample_count} records using device {device}."
+    )
 
     y_pred, y_true = gather_predictions(model, loader, device)
 
@@ -276,10 +371,14 @@ def main() -> None:
 
     payload = {
         "run_id": run_id,
+        "dataset": args.dataset,
         "split": args.split,
-        "num_samples": int(len(split_df)),
-        "checkpoint": str(args.checkpoint),
-        "manifest": str(args.manifest),
+        "num_samples": int(sample_count),
+        "checkpoint": str(checkpoint_path),
+        "manifest": str(args.manifest) if args.dataset == "medalcare" else None,
+        "ptbxl_root": str(args.ptbxl_root) if args.dataset == "ptbxl" else None,
+        "dataset_meta": dataset_meta,
+        "label_names": label_names,
         "metrics_requested": requested_metrics,
         "metrics": metrics_result,
         "head_indices": head_indices,
