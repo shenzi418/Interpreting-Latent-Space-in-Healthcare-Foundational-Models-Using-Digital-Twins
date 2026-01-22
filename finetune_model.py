@@ -24,7 +24,9 @@ def ft_12lead_ECGFounder(device, pth, n_classes, linear_prob=False):
       use_do=False,
       n_classes=n_classes)
 
-  checkpoint = torch.load(pth, map_location=device)
+  # PyTorch >=2.6 defaults torch.load to weights_only=True; our checkpoints
+  # include other pickled objects, so force weights_only=False for compatibility.
+  checkpoint = torch.load(pth, map_location=device, weights_only=False)
   state_dict = checkpoint['state_dict']
 
   state_dict = {k: v for k, v in state_dict.items() if not k.startswith('dense.')} 
@@ -81,6 +83,9 @@ def ft_multihead_ECGFounder(
     pth,
     n_medal_classes,
     n_ptb_classes,
+    n_theta=0,
+    physics_hidden=0,
+    physics_dropout=0.0,
     linear_prob=False,
 ):
   """
@@ -103,10 +108,14 @@ def ft_multihead_ECGFounder(
       use_do=False,
       n_medal_classes=n_medal_classes,
       n_ptb_classes=n_ptb_classes,
+      n_theta=n_theta,
+      physics_hidden=physics_hidden,
+      physics_dropout=physics_dropout,
       verbose=False,
   )
 
-  checkpoint = torch.load(pth, map_location=device)
+  # Set weights_only=False to allow loading older numpy scalars in the checkpoint
+  checkpoint = torch.load(pth, map_location=device, weights_only=False)
   state_dict = checkpoint.get('state_dict', checkpoint)
   state_dict = {k: v for k, v in state_dict.items() if not k.startswith('dense.')} 
 

@@ -11,3 +11,7 @@ outputs/*
 checkpoint/
 MedalRaw/
 *.pth
+openspec/
+.cursor/
+AGENTS.md
+env-ECGFounder.yml

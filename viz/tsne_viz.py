@@ -6,7 +6,7 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 
 # -------------------------------------------------------------------------
@@ -39,7 +39,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="tsne_medal_ptb.png",
+        default="pca_medal_ptb.png",
         help="Output filename (saved under outputs/)",
     )
     args = parser.parse_args()
@@ -141,17 +141,11 @@ def main():
     print(f"Total features: {features.shape[0]} samples, dim={features.shape[1]}")
 
     # ---------------------------------------------------------------------
-    # 4. Run t-SNE
+    # 4. Run PCA
     # ---------------------------------------------------------------------
-    print("Running t-SNE (this may take a bit) ...")
-    tsne = TSNE(
-        n_components=2,
-        random_state=42,
-        perplexity=30,
-        init="pca",
-        learning_rate="auto",
-    )
-    z_embedded = tsne.fit_transform(features)
+    print("Running PCA ...")
+    pca = PCA(n_components=2, random_state=42)
+    z_embedded = pca.fit_transform(features)
 
     # ---------------------------------------------------------------------
     # 5. Plot and save
@@ -189,7 +183,7 @@ def main():
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"✅ t-SNE plot saved to {out_path}")
+    print(f"✅ PCA plot saved to {out_path}")
 
 
 if __name__ == "__main__":

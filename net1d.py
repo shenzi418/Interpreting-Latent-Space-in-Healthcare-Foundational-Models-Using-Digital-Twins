@@ -387,6 +387,8 @@ class Net1D(nn.Module):
 
         # final prediction
         deep_features = out.mean(-1)
+        # Expose latest features for alignment or logging.
+        self.last_features = deep_features
         out = self.dense(deep_features)
 
         if self.return_features:
@@ -410,6 +412,9 @@ class MultiHeadECGFounder(nn.Module):
         use_do,
         n_medal_classes,
         n_ptb_classes,
+        n_theta=0,
+        physics_hidden=0,
+        physics_dropout=0.0,
         verbose=False,
     ):
         super().__init__()
@@ -431,18 +436,36 @@ class MultiHeadECGFounder(nn.Module):
         )
 
         feat_dim = self.backbone.dense.in_features
+        self.feature_dim = feat_dim
         # Optional: self.backbone.dense = nn.Identity()
         self.head_medal = nn.Linear(feat_dim, n_medal_classes)
         self.head_ptb = nn.Linear(feat_dim, n_ptb_classes)
+        self.head_physics = None
+        if n_theta and n_theta > 0:
+            if physics_hidden and physics_hidden > 0:
+                self.head_physics = nn.Sequential(
+                    nn.Linear(feat_dim, physics_hidden),
+                    nn.ReLU(),
+                    nn.Dropout(p=physics_dropout),
+                    nn.Linear(physics_hidden, n_theta),
+                )
+            else:
+                self.head_physics = nn.Linear(feat_dim, n_theta)
 
     def forward(self, x, task, return_features=False):
         # Backbone returns (logits, deep_features) when return_features=True
         _, features = self.backbone(x)
+        # Expose latest features for alignment or logging.
+        self.last_features = features
 
         if task == "medalcare":
             logits = self.head_medal(features)
         elif task == "ptbxl":
             logits = self.head_ptb(features)
+        elif task == "physics":
+            if self.head_physics is None:
+                raise ValueError("Physics head is not initialized.")
+            logits = self.head_physics(features)
         else:
             raise ValueError(f"Unknown task '{task}', expected 'medalcare' or 'ptbxl'.")
 

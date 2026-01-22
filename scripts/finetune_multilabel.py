@@ -32,7 +32,7 @@ from metrics import AVAILABLE_METRICS, compute_multilabel_metrics  # pylint: dis
 from losses.mmd import mmd_rbf  # pylint: disable=wrong-import-position
 from util import save_checkpoint  # pylint: disable=wrong-import-position
 
-DEFAULT_MANIFEST = REPO_ROOT / "MedalRaw" / "medalcare_filtered_manifest.csv"
+DEFAULT_MANIFEST = REPO_ROOT / "data" / "medalcare_filtered_manifest_dataset_split.csv"
 DEFAULT_CHECKPOINT = REPO_ROOT / "checkpoint" / "12_lead_ECGFounder.pth"
 DEFAULT_OUTPUTS = REPO_ROOT / "outputs"
 DEFAULT_PTBXL_ROOT = (
@@ -190,6 +190,70 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for encoder parameters (default: 1e-5).",
     )
     parser.add_argument(
+        "--theta-config",
+        type=Path,
+        default=REPO_ROOT / "config" / "theta.json",
+        help="θ contract JSON (default: config/theta.json).",
+    )
+    parser.add_argument(
+        "--theta-stats",
+        type=Path,
+        default=REPO_ROOT / "outputs" / "theta_stats.json",
+        help="θ normalization stats JSON (default: outputs/theta_stats.json).",
+    )
+    parser.add_argument(
+        "--theta-eval-stats",
+        type=Path,
+        default=None,
+        help="θ stats JSON for evaluation/denorm (defaults to --theta-stats).",
+    )
+    parser.add_argument(
+        "--theta-core-config",
+        type=Path,
+        default=None,
+        help="Optional θ_core config to restrict evaluation metrics.",
+    )
+    parser.add_argument(
+        "--lambda-phys",
+        type=float,
+        default=1.0,
+        help="Weight for physics loss (default: 1.0).",
+    )
+    parser.add_argument(
+        "--physics-hidden",
+        type=int,
+        default=256,
+        help="Hidden size for physics head MLP (default: 256).",
+    )
+    parser.add_argument(
+        "--physics-dropout",
+        type=float,
+        default=0.0,
+        help="Dropout for physics head MLP (default: 0.0).",
+    )
+    parser.add_argument(
+        "--physics-loss",
+        type=str,
+        choices=("mse", "huber"),
+        default="mse",
+        help="Loss for physics head (default: mse).",
+    )
+    parser.add_argument(
+        "--physics-metrics",
+        action="store_true",
+        help="Compute physics MAE/R2 on MedalCare test split after training.",
+    )
+    parser.add_argument(
+        "--physics-plots",
+        action="store_true",
+        help="Save physics sanity plots (scatter + distributions).",
+    )
+    parser.add_argument(
+        "--physics-only",
+        action="store_true",
+        help="Stage B: train physics head only (freeze encoder + classifiers).",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -305,6 +369,9 @@ def make_dataloader(
     include_domain: bool = False,
     domain_column: Optional[str] = None,
     domain_map: Optional[dict] = None,
+    include_theta: bool = False,
+    theta_config: Optional[Path] = None,
+    theta_stats: Optional[Path] = None,
 ) -> DataLoader:
     labels_df = df.reset_index(drop=True)
     if include_domain and domain_map is None:
@@ -315,6 +382,9 @@ def make_dataloader(
         include_metadata=include_domain,
         domain_column=domain_column,
         domain_map=domain_map,
+        include_theta=include_theta,
+        theta_config=theta_config,
+        theta_stats=theta_stats,
     )
     return DataLoader(
         dataset,
@@ -356,6 +426,9 @@ def enforce_ptbxl_checkpoint(requested: Path) -> Path:
 
 def build_medalcare_loaders(
     args: argparse.Namespace,
+    warn_mmd: bool = True,
+    include_theta: bool = False,
+    force_no_domain: bool = False,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[DataLoader], List[str], dict]:
     manifest = ensure_manifest(args.manifest)
     label_columns = [col for col in manifest.columns if col.startswith("label_")]
@@ -364,7 +437,11 @@ def build_medalcare_loaders(
     print(f"Loaded manifest with {len(manifest)} records.")
     print(f"Train/val/test sizes: {len(train_df)}/{len(val_df)}/{len(test_df)}")
 
-    include_domain = args.lambda_mmd > 0.0 and args.domain_column in train_df.columns
+    include_domain = (
+        False
+        if force_no_domain
+        else (args.lambda_mmd > 0.0 and args.domain_column in train_df.columns)
+    )
     if include_domain:
         unique_domains = [
             val for val in pd.Series(train_df[args.domain_column]).dropna().unique()
@@ -372,7 +449,7 @@ def build_medalcare_loaders(
         domain_map = {value: idx for idx, value in enumerate(sorted(unique_domains))}
         print(f"Detected domains for MMD: {domain_map}")
     else:
-        if args.lambda_mmd > 0.0:
+        if warn_mmd and args.lambda_mmd > 0.0 and not force_no_domain:
             print(
                 f"[WARN] Domain column '{args.domain_column}' not found; disabling MMD penalty."
             )
@@ -386,15 +463,38 @@ def build_medalcare_loaders(
         include_domain=include_domain,
         domain_column=args.domain_column if include_domain else None,
         domain_map=domain_map,
+        include_theta=include_theta,
+        theta_config=args.theta_config if include_theta else None,
+        theta_stats=args.theta_stats if include_theta else None,
     )
     val_loader = make_dataloader(
-        val_df, args.batch_size, args.num_workers, shuffle=False
+        val_df,
+        args.batch_size,
+        args.num_workers,
+        shuffle=False,
+        include_theta=include_theta,
+        theta_config=args.theta_config if include_theta else None,
+        theta_stats=args.theta_stats if include_theta else None,
     )
     test_loader = make_dataloader(
-        test_df, args.batch_size, args.num_workers, shuffle=False
+        test_df,
+        args.batch_size,
+        args.num_workers,
+        shuffle=False,
+        include_theta=include_theta,
+        theta_config=args.theta_config if include_theta else None,
+        theta_stats=args.theta_stats if include_theta else None,
     )
     train_eval_loader = (
-        make_dataloader(train_df, args.batch_size, args.num_workers, shuffle=False)
+        make_dataloader(
+            train_df,
+            args.batch_size,
+            args.num_workers,
+            shuffle=False,
+            include_theta=include_theta,
+            theta_config=args.theta_config if include_theta else None,
+            theta_stats=args.theta_stats if include_theta else None,
+        )
         if args.eval_on_train
         else None
     )
@@ -417,6 +517,7 @@ def build_medalcare_loaders(
 
 def build_ptbxl_loaders(
     args: argparse.Namespace,
+    warn_mmd: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[DataLoader], List[str], dict]:
     label_columns = list(PTBXLDataset.SUPERCLASS_LABELS)
     n_classes = len(label_columns)
@@ -434,7 +535,7 @@ def build_ptbxl_loaders(
         "Loaded PTB-XL split counts "
         f"train/val/test: {len(train_dataset)}/{len(val_dataset)}/{len(test_dataset)}"
     )
-    if args.lambda_mmd > 0.0:
+    if warn_mmd and args.lambda_mmd > 0.0:
         print("[WARN] MMD penalty disabled for PTB-XL (no domain labels available).")
 
     train_loader = make_ptbxl_loader(
@@ -549,7 +650,9 @@ def evaluate_model(
     targets: List[np.ndarray] = []
 
     with torch.no_grad():
-        for inputs, labels in tqdm(loader, desc="Evaluating", leave=False):
+        for batch in tqdm(loader, desc="Evaluating", leave=False):
+            inputs = batch[0]
+            labels = batch[1]
             inputs = inputs.to(device, non_blocking=True)
             logits = model(inputs, task=task) if task else model(inputs)
             probs = torch.sigmoid(logits).cpu().numpy()
@@ -567,6 +670,225 @@ def evaluate_model(
         "y_pred": y_pred,
         "metrics": metrics,
     }
+
+
+def evaluate_physics(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+) -> Optional[Dict[str, object]]:
+    if loader.dataset is None or len(loader.dataset) == 0:
+        return None
+
+    model.eval()
+    preds: List[np.ndarray] = []
+    targets: List[np.ndarray] = []
+    masks: List[np.ndarray] = []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="Evaluating physics", leave=False):
+            inputs = batch[0].to(device, non_blocking=True)
+            theta = batch[2].to(device, non_blocking=True)
+            mask = batch[3].to(device, non_blocking=True)
+            theta_pred = model(inputs, task="physics")
+            preds.append(theta_pred.cpu().numpy())
+            targets.append(theta.cpu().numpy())
+            masks.append(mask.cpu().numpy())
+
+    if not preds:
+        return None
+
+    y_pred = np.concatenate(preds, axis=0)
+    y_true = np.concatenate(targets, axis=0)
+    y_mask = np.concatenate(masks, axis=0)
+    return {"y_true": y_true, "y_pred": y_pred, "mask": y_mask}
+
+
+def compute_physics_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    mask: np.ndarray,
+    theta_stats: Optional[dict] = None,
+    theta_names: Optional[List[str]] = None,
+    theta_core_names: Optional[List[str]] = None,
+    tiny: float = 1e-8,
+) -> Dict[str, object]:
+    def rankdata(values: np.ndarray) -> np.ndarray:
+        series = pd.Series(values)
+        return series.rank(method="average").to_numpy(dtype=np.float64)
+
+    stats = theta_stats or {}
+    transforms = stats.get("transform")
+    means = stats.get("mean")
+    stds = stats.get("std")
+
+    indices = list(range(y_true.shape[1]))
+    missing_core = []
+    if theta_core_names and theta_names:
+        name_to_idx = {name: idx for idx, name in enumerate(theta_names)}
+        indices = []
+        for name in theta_core_names:
+            if name in name_to_idx:
+                indices.append(name_to_idx[name])
+            else:
+                missing_core.append(name)
+
+    if indices:
+        y_true = y_true[:, indices]
+        y_pred = y_pred[:, indices]
+        mask = mask[:, indices]
+        if theta_names:
+            theta_names = [theta_names[i] for i in indices]
+        if transforms:
+            transforms = [transforms[i] for i in indices]
+        if means:
+            means = [means[i] for i in indices]
+        if stds:
+            stds = [stds[i] for i in indices]
+
+    num_params = y_true.shape[1]
+    mae = []
+    mae_raw = []
+    r2 = []
+    pearson = []
+    spearman = []
+    effective_n = []
+    for idx in range(num_params):
+        m = mask[:, idx] > 0.5
+        if not np.any(m):
+            mae.append(None)
+            mae_raw.append(None)
+            r2.append(None)
+            pearson.append(None)
+            spearman.append(None)
+            effective_n.append(0)
+            continue
+        true = y_true[m, idx]
+        pred = y_pred[m, idx]
+        mae_val = float(np.mean(np.abs(true - pred)))
+        ss_res = np.sum((true - pred) ** 2)
+        ss_tot = np.sum((true - np.mean(true)) ** 2)
+        r2_val = None if ss_tot < tiny else float(1.0 - ss_res / ss_tot)
+        mae.append(mae_val)
+        r2.append(r2_val)
+
+        if stds:
+            std = stds[idx] if stds[idx] and stds[idx] > 0 else 1.0
+            mae_raw.append(float(mae_val * std))
+        else:
+            mae_raw.append(None)
+
+        true_std = float(np.std(true))
+        pred_std = float(np.std(pred))
+        if ss_tot < tiny or true_std < tiny or pred_std < tiny:
+            pearson.append(None)
+            spearman.append(None)
+        else:
+            pearson_val = float(np.corrcoef(true, pred)[0, 1])
+            pearson.append(pearson_val)
+            true_rank = rankdata(true)
+            pred_rank = rankdata(pred)
+            spearman_val = float(np.corrcoef(true_rank, pred_rank)[0, 1])
+            spearman.append(spearman_val)
+        effective_n.append(int(np.sum(m)))
+
+    mae_values = [v for v in mae if v is not None]
+    mae_raw_values = [v for v in mae_raw if v is not None]
+    r2_values = [v for v in r2 if v is not None]
+    pearson_values = [v for v in pearson if v is not None]
+    spearman_values = [v for v in spearman if v is not None]
+    r2_tiers = {
+        "strong": int(sum(v >= 0.5 for v in r2_values)),
+        "moderate": int(sum(0.2 <= v < 0.5 for v in r2_values)),
+        "weak": int(sum(v < 0.2 for v in r2_values)),
+        "undefined": int(sum(v is None for v in r2)),
+    }
+    return {
+        "theta_names": theta_names,
+        "mae_norm": mae,
+        "mae_raw": mae_raw,
+        "r2": r2,
+        "pearson": pearson,
+        "spearman": spearman,
+        "effective_n": effective_n,
+        "summary": {
+            "mae_norm_mean": float(np.mean(mae_values)) if mae_values else None,
+            "mae_norm_median": float(np.median(mae_values)) if mae_values else None,
+            "mae_raw_mean": float(np.mean(mae_raw_values)) if mae_raw_values else None,
+            "mae_raw_median": float(np.median(mae_raw_values)) if mae_raw_values else None,
+            "r2_mean": float(np.mean(r2_values)) if r2_values else None,
+            "r2_median": float(np.median(r2_values)) if r2_values else None,
+            "pearson_mean": float(np.mean(pearson_values)) if pearson_values else None,
+            "spearman_mean": float(np.mean(spearman_values)) if spearman_values else None,
+            "r2_tiers": r2_tiers,
+        },
+        "meta": {
+            "normalization": "zscore" if stds else "none",
+            "transform": transforms,
+            "missing_theta_core": missing_core,
+            "mae_spaces": ["normalized", "raw"] if stds else ["normalized"],
+        },
+    }
+
+
+def save_physics_plots(
+    outputs_dir: Path,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    mask: np.ndarray,
+    indices: Optional[List[int]] = None,
+    theta_stats: Optional[dict] = None,
+    theta_names: Optional[List[str]] = None,
+    max_dims: int = 6,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    plots_dir = outputs_dir / "physics_plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    num_dims = y_true.shape[1]
+    if indices is None:
+        dims = list(range(min(num_dims, max_dims)))
+    else:
+        dims = indices[: max_dims]
+    stds = theta_stats.get("std") if theta_stats else None
+    for idx in dims:
+        m = mask[:, idx] > 0.5
+        if not np.any(m):
+            continue
+        true = y_true[m, idx]
+        pred = y_pred[m, idx]
+        label = f"θ[{idx}]"
+        if theta_names and idx < len(theta_names):
+            label = theta_names[idx]
+        if stds and idx < len(stds):
+            std = stds[idx] if stds[idx] and stds[idx] > 0 else 1.0
+            true = true * std
+            pred = pred * std
+
+        # Scatter plot
+        plt.figure(figsize=(5, 5))
+        plt.scatter(true, pred, s=8, alpha=0.5)
+        min_v = min(true.min(), pred.min())
+        max_v = max(true.max(), pred.max())
+        plt.plot([min_v, max_v], [min_v, max_v], "--", color="gray")
+        plt.xlabel("θ true")
+        plt.ylabel("θ pred")
+        plt.title(f"{label} scatter")
+        plt.tight_layout()
+        plt.savefig(plots_dir / f"theta_{idx}_scatter.png", dpi=150)
+        plt.close()
+
+        # Distribution plot
+        plt.figure(figsize=(6, 4))
+        plt.hist(true, bins=30, alpha=0.6, label="true")
+        plt.hist(pred, bins=30, alpha=0.6, label="pred")
+        plt.legend()
+        plt.xlabel("value")
+        plt.ylabel("count")
+        plt.title(f"{label} distribution")
+        plt.tight_layout()
+        plt.savefig(plots_dir / f"theta_{idx}_dist.png", dpi=150)
+        plt.close()
 
 
 def select_primary_metric(metrics: Dict[str, object], candidates: List[str]) -> Tuple[str, Optional[float]]:
@@ -637,6 +959,22 @@ def save_numpy_payload(path: Path, name: str, package: Dict[str, object]) -> Non
     np.savez_compressed(path / f"{name}.npz", y_true=package["y_true"], y_pred=package["y_pred"])
 
 
+def load_theta_names(theta_config_path: Path) -> List[str]:
+    payload = json.loads(theta_config_path.read_text(encoding="utf-8"))
+    return [entry["name"] for entry in payload.get("theta", [])]
+
+
+def select_top_theta_indices(
+    metric_values: List[Optional[float]],
+    top_k: int = 6,
+) -> List[int]:
+    candidates = [
+        (idx, value) for idx, value in enumerate(metric_values) if value is not None
+    ]
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    return [idx for idx, _ in candidates[:top_k]]
+
+
 def main() -> None:
     args = parse_args()
     args.freeze_encoder = args.freeze_encoder or getattr(args, "linear_probe", False)
@@ -647,6 +985,15 @@ def main() -> None:
     if args.dataset == "ptbxl" and not args.freeze_encoder:
         print("[INFO] Enabling --freeze-encoder for PTB-XL Stage 1 baseline.")
         args.freeze_encoder = True
+
+    joint_mode = args.joint_datasets is not None
+    if joint_mode and not args.multi_head:
+        raise ValueError("--joint-datasets requires --multi-head")
+
+    if args.physics_only and not joint_mode:
+        raise ValueError("--physics-only requires --joint-datasets for MedalCare batches.")
+    if args.physics_only and args.lambda_phys != 1.0:
+        print("[INFO] --physics-only ignores lambda_phys; using physics loss only.")
 
     outputs_base = (
         PTBXL_OUTPUT_ROOT / args.head_type if args.dataset == "ptbxl" else DEFAULT_OUTPUTS
@@ -662,10 +1009,6 @@ def main() -> None:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    joint_mode = args.joint_datasets is not None
-    if joint_mode and not args.multi_head:
-        raise ValueError("--joint-datasets requires --multi-head")
-
     # Build loaders and label space
     if joint_mode:
         # Joint: both datasets needed
@@ -676,7 +1019,9 @@ def main() -> None:
             medal_train_eval,
             medal_labels,
             medal_info,
-        ) = build_medalcare_loaders(args)
+        ) = build_medalcare_loaders(
+            args, warn_mmd=False, include_theta=True, force_no_domain=True
+        )
         (
             ptb_train,
             ptb_val,
@@ -684,7 +1029,7 @@ def main() -> None:
             ptb_train_eval,
             ptb_labels,
             ptb_info,
-        ) = build_ptbxl_loaders(args)
+        ) = build_ptbxl_loaders(args, warn_mmd=False)
         label_columns = medal_labels + ptb_labels  # for metrics bookkeeping if needed
         n_medal = len(medal_labels)
         n_ptb = len(ptb_labels)
@@ -701,7 +1046,7 @@ def main() -> None:
         dataset_meta = {"medalcare": medal_info["dataset_meta"], "ptbxl": ptb_info["dataset_meta"]}
         pos_counts = {"medalcare": medal_pos_counts, "ptbxl": ptb_pos_counts}
         neg_counts = {"medalcare": medal_neg_counts, "ptbxl": ptb_neg_counts}
-        checkpoint_path = enforce_ptbxl_checkpoint(args.checkpoint)
+        checkpoint_path = args.checkpoint
     else:
         if args.dataset == "medalcare":
             (
@@ -711,7 +1056,7 @@ def main() -> None:
                 train_eval_loader,
                 label_columns,
                 info,
-            ) = build_medalcare_loaders(args)
+            ) = build_medalcare_loaders(args, include_theta=True)
             n_classes = len(label_columns)
             pos_counts = info["pos_counts"]
             neg_counts = info["train_sample_count"] - pos_counts
@@ -738,20 +1083,34 @@ def main() -> None:
 
     # Build model
     if joint_mode or args.multi_head:
-        n_medal_classes = 8
-        n_ptb_classes = 5
+        n_medal_classes = n_medal if joint_mode else (n_classes if args.dataset == "medalcare" else 8)
+        n_ptb_classes = n_ptb if joint_mode else (n_classes if args.dataset == "ptbxl" else 5)
+        n_theta = len(json.loads(Path(args.theta_config).read_text(encoding="utf-8")).get("theta", []))
         model = ft_multihead_ECGFounder(
             device=device,
             pth=str(checkpoint_path),
             n_medal_classes=n_medal_classes,
             n_ptb_classes=n_ptb_classes,
+            n_theta=n_theta,
+            physics_hidden=args.physics_hidden,
+            physics_dropout=args.physics_dropout,
             linear_prob=args.freeze_encoder,
         )
+        if hasattr(model, "feature_dim"):
+            print(f"[INFO] Shared encoder feature dim (z): {model.feature_dim}")
         # heads are internal; freezing handled in builder for encoder
         head_params = [p for n, p in model.named_parameters() if "head_" in n and p.requires_grad]
         encoder_params = [
             p for n, p in model.named_parameters() if "head_" not in n and p.requires_grad
         ]
+        if args.physics_only:
+            for name, param in model.named_parameters():
+                if name.startswith("head_physics"):
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+            head_params = [p for n, p in model.named_parameters() if "head_physics" in n and p.requires_grad]
+            encoder_params = []
         if not head_params and not encoder_params:
             raise ValueError("No trainable parameters found. Check --freeze-encoder/--multi-head settings.")
         param_groups = []
@@ -856,13 +1215,19 @@ def main() -> None:
             samples_medal = 0
             samples_ptb = 0
 
+            running_mmd = 0.0
+            mmd_batches = 0
+            train_phys_sum = 0.0
+            train_phys_count = 0.0
             for (batch_medal, batch_ptb) in zip(medal_train, ptb_train):
-                medal_inputs, medal_targets = batch_medal[:2]
+                medal_inputs, medal_targets, theta_targets, theta_mask = batch_medal[:4]
                 ptb_inputs, ptb_targets = batch_ptb[:2]
                 medal_inputs = medal_inputs.to(device, non_blocking=True)
                 ptb_inputs = ptb_inputs.to(device, non_blocking=True)
                 medal_targets = medal_targets.to(device, non_blocking=True)
                 ptb_targets = ptb_targets.to(device, non_blocking=True)
+                theta_targets = theta_targets.to(device, non_blocking=True)
+                theta_mask = theta_mask.to(device, non_blocking=True)
 
                 if args.label_smoothing > 0.0:
                     medal_targets_s = medal_targets * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
@@ -872,11 +1237,49 @@ def main() -> None:
                     ptb_targets_s = ptb_targets
 
                 optimizer.zero_grad()
-                logits_medal = model(medal_inputs, task="medalcare")
-                logits_ptb = model(ptb_inputs, task="ptbxl")
-                loss_medal = criterion_medal(logits_medal, medal_targets_s)
-                loss_ptb = criterion_ptb(logits_ptb, ptb_targets_s)
-                loss = loss_medal + loss_ptb
+                if args.physics_only:
+                    _, feat_medal = model(medal_inputs, task="medalcare", return_features=True)
+                    if model.head_physics is None:
+                        raise ValueError("Physics head is not initialized.")
+                    theta_pred = model.head_physics(feat_medal)
+                    loss_medal = None
+                    loss_ptb = None
+                else:
+                    logits_medal, feat_medal = model(
+                        medal_inputs, task="medalcare", return_features=True
+                    )
+                    logits_ptb, feat_ptb = model(
+                        ptb_inputs, task="ptbxl", return_features=True
+                    )
+                    if model.head_physics is None:
+                        raise ValueError("Physics head is not initialized.")
+                    theta_pred = model.head_physics(feat_medal)
+                    loss_medal = criterion_medal(logits_medal, medal_targets_s)
+                    loss_ptb = criterion_ptb(logits_ptb, ptb_targets_s)
+                if args.physics_loss == "huber":
+                    phys_raw = torch.nn.functional.smooth_l1_loss(
+                        theta_pred, theta_targets, reduction="none"
+                    )
+                else:
+                    phys_raw = torch.nn.functional.mse_loss(
+                        theta_pred, theta_targets, reduction="none"
+                    )
+                valid_count = float(theta_mask.sum().detach().cpu())
+                phys_loss = (phys_raw * theta_mask).sum() / torch.clamp(theta_mask.sum(), min=1.0)
+                if args.physics_only:
+                    loss = phys_loss
+                else:
+                    loss = loss_medal + loss_ptb + args.lambda_phys * phys_loss
+                if (
+                    not args.physics_only
+                    and args.lambda_mmd > 0.0
+                    and feat_medal.size(0) > 1
+                    and feat_ptb.size(0) > 1
+                ):
+                    mmd_value = mmd_rbf(feat_medal, feat_ptb)
+                    loss = loss + args.lambda_mmd * mmd_value
+                    running_mmd += mmd_value.item()
+                    mmd_batches += 1
                 loss.backward()
                 if args.grad_clip and args.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -884,20 +1287,29 @@ def main() -> None:
 
                 b_medal = medal_inputs.size(0)
                 b_ptb = ptb_inputs.size(0)
-                running_loss_medal += loss_medal.item() * b_medal
-                running_loss_ptb += loss_ptb.item() * b_ptb
-                samples_medal += b_medal
-                samples_ptb += b_ptb
+                if loss_medal is not None:
+                    running_loss_medal += loss_medal.item() * b_medal
+                    samples_medal += b_medal
+                if loss_ptb is not None:
+                    running_loss_ptb += loss_ptb.item() * b_ptb
+                    samples_ptb += b_ptb
+                train_phys_sum += phys_loss.item() * valid_count
+                train_phys_count += valid_count
 
             train_loss = {
                 "medalcare": running_loss_medal / max(samples_medal, 1),
                 "ptbxl": running_loss_ptb / max(samples_ptb, 1),
             }
-            train_mmd = None
-            print(
-                f"Training loss -> MedalCare: {train_loss['medalcare']:.6f}, "
-                f"PTB-XL: {train_loss['ptbxl']:.6f}"
-            )
+            train_mmd = running_mmd / mmd_batches if mmd_batches > 0 else None
+            train_phys = train_phys_sum / max(train_phys_count, 1.0)
+            if not args.physics_only:
+                print(
+                    f"Training loss -> MedalCare: {train_loss['medalcare']:.6f}, "
+                    f"PTB-XL: {train_loss['ptbxl']:.6f}"
+                )
+                if train_mmd is not None:
+                    print(f"Average MMD: {train_mmd:.6f}")
+            print(f"Physics loss: {train_phys:.6f}")
         else:
             train_loss, train_mmd = train_one_epoch(
                 model,
@@ -996,6 +1408,8 @@ def main() -> None:
             "train_loss": train_loss,
             "primary_metric": {"name": primary_metric_name, "value": primary_metric_value},
         }
+        if joint_mode:
+            metrics_entry["train_phys"] = train_phys
         if train_mmd is not None:
             metrics_entry["train_mmd"] = train_mmd
         if joint_mode:
@@ -1050,6 +1464,65 @@ def main() -> None:
                 f"{args.early_stop_lr:g}; stopping training."
             )
             break
+
+    physics_metrics = None
+    if args.physics_metrics and joint_mode:
+        print("Computing physics metrics on MedalCare test split.")
+        medal_test_loader = loaders["medalcare"][2]
+        physics_package = evaluate_physics(model, medal_test_loader, device)
+        if physics_package is not None:
+            eval_stats_path = args.theta_eval_stats or args.theta_stats
+            theta_stats = None
+            if eval_stats_path is not None and eval_stats_path.exists():
+                theta_stats = json.loads(eval_stats_path.read_text(encoding="utf-8"))
+            theta_names = load_theta_names(args.theta_config)
+            theta_core_names = None
+            core_config = args.theta_core_config
+            default_core = REPO_ROOT / "config" / "theta_core.json"
+            if core_config is None and default_core.exists():
+                core_config = default_core
+            if core_config is not None and core_config.exists():
+                theta_core_names = load_theta_names(core_config)
+            physics_metrics = compute_physics_metrics(
+                physics_package["y_true"],
+                physics_package["y_pred"],
+                physics_package["mask"],
+                theta_stats=theta_stats,
+                theta_names=theta_names,
+                theta_core_names=theta_core_names,
+            )
+            if physics_metrics is not None and eval_stats_path is not None:
+                physics_metrics.setdefault("meta", {})["theta_stats_path"] = str(
+                    eval_stats_path
+                )
+            metrics_path = outputs_dir / "physics_metrics.json"
+            with metrics_path.open("w", encoding="utf-8") as fp:
+                json.dump(physics_metrics, fp, indent=2)
+            print(f"Saved physics metrics to: {metrics_path}")
+            if args.physics_plots:
+                metric_values = None
+                if isinstance(physics_metrics.get("spearman"), list):
+                    metric_values = physics_metrics["spearman"]
+                elif isinstance(physics_metrics.get("r2"), list):
+                    metric_values = physics_metrics["r2"]
+                plot_indices = (
+                    select_top_theta_indices(metric_values, top_k=6)
+                    if metric_values
+                    else None
+                )
+                save_physics_plots(
+                    outputs_dir,
+                    physics_package["y_true"],
+                    physics_package["y_pred"],
+                    physics_package["mask"],
+                    indices=plot_indices,
+                    theta_stats=theta_stats,
+                    theta_names=physics_metrics.get("theta_names"),
+                )
+
+    if physics_metrics is not None:
+        best_snapshot = best_snapshot or {}
+        best_snapshot["physics"] = physics_metrics
 
     metrics_path = outputs_dir / "metrics.json"
     save_metrics_report(metrics_path, run_id, metrics_to_compute, metrics_log, best_snapshot)

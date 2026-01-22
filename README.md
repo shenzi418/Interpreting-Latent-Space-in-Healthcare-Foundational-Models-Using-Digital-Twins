@@ -13,3 +13,9 @@ The repository currently contains scripts for preparing MedalCare-XL ECG data, c
 - `README_w1.md` – Week-one progress report with step-by-step reproduction instructions and result summaries.
 
 Refer to `README_w1.md` to reproduce the current experiments end-to-end.
+
+## MedalCare splits
+- `data/medalcare_filtered_manifest_dataset_split.csv` stores the original
+  dataset split (`train`/`val`/`test`) and a `run_id` derived from
+  `original_csv_path`.
+- Generate it with: `python scripts/add_medalcare_splits.py`

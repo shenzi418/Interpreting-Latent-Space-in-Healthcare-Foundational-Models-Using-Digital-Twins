@@ -1,0 +1,874 @@
+{
+  "granularity": "per_run",
+  "theta": [
+    {
+      "name": "APD.max",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "APD.min",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "APD.rho_d",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "APD.v_d",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "APD.z_d",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LA.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LA.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LA.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LL.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LL.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "LL.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RA.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RA.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RA.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RL.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RL.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "RL.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V1.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V1.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V1.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V2.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V2.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V2.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V3.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V3.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V3.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V4.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V4.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V4.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V5.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V5.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V5.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V6.phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V6.rho",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "V6.z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 16842
+      }
+    },
+    {
+      "name": "cv_t.BulkTissue",
+      "sources": [
+        "atrial"
+      ],
+      "units": "mm/s",
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 16842,
+        "ventricular": 0
+      }
+    },
+    {
+      "name": "stim[0].phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[0].thr",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[0].z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[1].phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15541
+      }
+    },
+    {
+      "name": "stim[1].thr",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[1].z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[2].phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[2].thr",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[2].z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15542
+      }
+    },
+    {
+      "name": "stim[3].phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15543
+      }
+    },
+    {
+      "name": "stim[3].z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15544
+      }
+    },
+    {
+      "name": "stim[4].phi",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15544
+      }
+    },
+    {
+      "name": "stim[4].thr",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15544
+      }
+    },
+    {
+      "name": "stim[4].time",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15544
+      }
+    },
+    {
+      "name": "stim[4].z",
+      "sources": [
+        "ventricular"
+      ],
+      "units": null,
+      "continuous": true,
+      "bounded": null,
+      "transform": "none",
+      "counts": {
+        "atrial": 0,
+        "ventricular": 15544
+      }
+    }
+  ],
+  "excluded": {
+    "constant_like": [
+      "APD.antpost_d",
+      "G.atria",
+      "G.el",
+      "G.fibrosis",
+      "G.in",
+      "G.ischemia",
+      "G.it",
+      "G.torso",
+      "ar.InferiorIsthmus",
+      "ar.PectinateMuscles",
+      "cv.lvendo_f",
+      "cv.lvendo_n_r",
+      "cv.lvendo_s_r",
+      "cv.lvmyo_n_r",
+      "cv.rvendo_f",
+      "cv.rvendo_n_r",
+      "cv.rvendo_s_r",
+      "cv.rvmyo_n_r",
+      "fibers.alpha_endo",
+      "fibers.alpha_epi",
+      "isch[0].npart",
+      "isch[0].rate",
+      "isch[0].restrict_ven",
+      "isch[0].rho",
+      "isch[0].rho_eps_min",
+      "isch[0].tag",
+      "isch[0].vel_n",
+      "isch[0].vel_s",
+      "isch[0].ven",
+      "lvendo.z_min",
+      "rvendo.z_min",
+      "stim[0].rho",
+      "stim[0].rho_eps",
+      "stim[0].ven",
+      "stim[1].rho",
+      "stim[1].rho_eps",
+      "stim[1].ven",
+      "stim[2].rho",
+      "stim[2].rho_eps",
+      "stim[2].ven",
+      "stim[3].rho",
+      "stim[3].rho_eps",
+      "stim[3].thr",
+      "stim[3].ven",
+      "stim[4].rho",
+      "stim[4].rho_eps",
+      "stim[4].ven",
+      "transl.x",
+      "transl.y",
+      "transl.z"
+    ],
+    "low_coverage": [
+      "isch[0].npart",
+      "isch[0].phi",
+      "isch[0].rate",
+      "isch[0].restrict_ven",
+      "isch[0].rho",
+      "isch[0].rho_eps_max",
+      "isch[0].rho_eps_min",
+      "isch[0].size",
+      "isch[0].tag",
+      "isch[0].vel_f",
+      "isch[0].vel_n",
+      "isch[0].vel_s",
+      "isch[0].ven",
+      "isch[0].z"
+    ],
+    "flag_like": [
+      "APD.antpost_d",
+      "G.atria",
+      "G.blood",
+      "G.el",
+      "G.en",
+      "G.et",
+      "G.fibrosis",
+      "G.il",
+      "G.in",
+      "G.ischemia",
+      "G.it",
+      "G.lungs",
+      "G.torso",
+      "ar.BachmannsBundle",
+      "ar.BulkTissue",
+      "ar.CristaTerminalis",
+      "ar.InferiorIsthmus",
+      "ar.PectinateMuscles",
+      "cv.lvendo_f",
+      "cv.lvendo_n_r",
+      "cv.lvendo_s_r",
+      "cv.lvmyo_f",
+      "cv.lvmyo_n_r",
+      "cv.lvmyo_s_r",
+      "cv.rvendo_f",
+      "cv.rvendo_n_r",
+      "cv.rvendo_s_r",
+      "cv.rvmyo_f",
+      "cv.rvmyo_n_r",
+      "cv.rvmyo_s_r",
+      "cv_t.BachmannsBundle",
+      "cv_t.CristaTerminalis",
+      "cv_t.InferiorIsthmus",
+      "cv_t.PectinateMuscles",
+      "fibers.alpha_endo",
+      "fibers.alpha_epi",
+      "fibperc",
+      "isch[0].npart",
+      "isch[0].rate",
+      "isch[0].restrict_ven",
+      "isch[0].rho",
+      "isch[0].rho_eps_max",
+      "isch[0].rho_eps_min",
+      "isch[0].tag",
+      "isch[0].vel_f",
+      "isch[0].vel_n",
+      "isch[0].vel_s",
+      "isch[0].ven",
+      "lvendo.z_max",
+      "lvendo.z_min",
+      "rot.x",
+      "rot.y",
+      "rot.z",
+      "rvendo.z_max",
+      "rvendo.z_min",
+      "stim[0].rho",
+      "stim[0].rho_eps",
+      "stim[0].time",
+      "stim[0].ven",
+      "stim[1].rho",
+      "stim[1].rho_eps",
+      "stim[1].time",
+      "stim[1].ven",
+      "stim[2].rho",
+      "stim[2].rho_eps",
+      "stim[2].time",
+      "stim[2].ven",
+      "stim[3].rho",
+      "stim[3].rho_eps",
+      "stim[3].thr",
+      "stim[3].time",
+      "stim[3].ven",
+      "stim[4].rho",
+      "stim[4].rho_eps",
+      "stim[4].ven",
+      "suffix",
+      "transl.x",
+      "transl.y",
+      "transl.z"
+    ]
+  },
+  "criteria": {
+    "eps_std": 1e-05,
+    "cov_thresh": 0.9
+  }
+}

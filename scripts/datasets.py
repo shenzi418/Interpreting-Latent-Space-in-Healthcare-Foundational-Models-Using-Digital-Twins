@@ -1,6 +1,8 @@
 import ast
+import json
+import re
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Type
+from typing import Dict, Optional, Sequence, Type, Tuple
 
 import numpy as np
 import pandas as pd
@@ -72,6 +74,9 @@ class LVEF_12lead_cls_Dataset(Dataset):
         include_metadata: bool = False,
         domain_column: Optional[str] = None,
         domain_map: Optional[dict] = None,
+        include_theta: bool = False,
+        theta_config: Optional[Path] = None,
+        theta_stats: Optional[Path] = None,
     ):
         """
         Args:
@@ -93,6 +98,18 @@ class LVEF_12lead_cls_Dataset(Dataset):
         self.domain_map = domain_map
         if self.include_metadata and self.domain_column and self.domain_column not in labels_df.columns:
             raise ValueError(f"Domain column '{self.domain_column}' not found in labels dataframe.")
+        self.include_theta = include_theta
+        self.theta_config = theta_config
+        self.theta_keys: Optional[list] = None
+        self.theta_stats = None
+        if self.include_theta:
+            if self.theta_config is None:
+                raise ValueError("theta_config must be provided when include_theta=True.")
+            if "original_csv_path" not in labels_df.columns:
+                raise ValueError("Manifest must include 'original_csv_path' to derive θ paths.")
+            self.theta_keys = self._load_theta_keys(self.theta_config)
+            if theta_stats is not None:
+                self.theta_stats = self._load_theta_stats(theta_stats)
         
         # Extract label column names (handle both new manifest format and old format)
         self.label_cols = [f'label_{i}' for i in range(8)]
@@ -176,6 +193,7 @@ class LVEF_12lead_cls_Dataset(Dataset):
             # Ensure it's a row vector for multi-label classification
             labels = labels.unsqueeze(0) if labels.shape[0] == 1 else labels
         
+        domain_tensor = None
         if self.include_metadata and self.domain_column and self.domain_column in self.labels_df.columns:
             domain_value = self.labels_df.iloc[idx][self.domain_column]
             if self.domain_map is not None:
@@ -183,8 +201,130 @@ class LVEF_12lead_cls_Dataset(Dataset):
             else:
                 domain_id = -1
             domain_tensor = torch.tensor(domain_id, dtype=torch.long)
+
+        theta_tensor = None
+        theta_mask = None
+        if self.include_theta:
+            original_path = Path(str(self.labels_df.iloc[idx]["original_csv_path"]))
+            theta_values, theta_mask = self._load_theta(original_path)
+            if self.theta_stats is not None:
+                theta_values, theta_mask = self._normalize_theta(theta_values, theta_mask)
+            theta_tensor = torch.tensor(theta_values, dtype=torch.float32)
+            theta_mask = torch.tensor(theta_mask, dtype=torch.float32)
+
+        if domain_tensor is not None and theta_tensor is not None:
+            return signal, labels, domain_tensor, theta_tensor, theta_mask
+        if theta_tensor is not None:
+            return signal, labels, theta_tensor, theta_mask
+        if domain_tensor is not None:
             return signal, labels, domain_tensor
         return signal, labels     
+
+    @staticmethod
+    def _load_theta_keys(theta_config: Path) -> list:
+        payload = json.loads(theta_config.read_text(encoding="utf-8"))
+        theta = payload.get("theta", [])
+        return [entry["name"] for entry in theta]
+
+    @staticmethod
+    def _load_theta_stats(theta_stats_path: Path) -> dict:
+        return json.loads(theta_stats_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _parse_value(raw: str) -> Optional[float]:
+        text = raw.strip().strip('"').strip("'")
+        if not text:
+            return None
+        if text.lower() in {"true", "false"}:
+            return None
+        match = re.match(r"^\s*([+-]?\d+(?:\.\d+)?)([a-zA-Z/]+)?\s*$", text)
+        if not match:
+            return None
+        return float(match.group(1))
+
+    def _parse_parameter_file(self, path: Path) -> dict:
+        values = {}
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" not in line:
+                continue
+            key, raw = [part.strip() for part in line.split("=", 1)]
+            value = self._parse_value(raw)
+            if value is None:
+                continue
+            values[key] = value
+        return values
+
+    def _parameter_paths(self, original_csv_path: Path) -> Tuple[Path, Path]:
+        parts = list(original_csv_path.parts)
+        lowered = [part.lower() for part in parts]
+        if "wp2_largedataset_noise" not in lowered:
+            raise ValueError(f"Unexpected MedalCare path: {original_csv_path}")
+        idx = lowered.index("wp2_largedataset_noise")
+        parts[idx] = "WP2_largeDataset_ParameterFiles"
+        base_dir = Path(*parts[:-1])
+        stem = original_csv_path.stem
+        if stem.endswith("_filtered"):
+            stem = stem[: -len("_filtered")]
+        run_base = stem if stem.startswith("run_") else f"run_{stem}"
+        atrial = base_dir / f"{run_base}_AtrialParameters.txt"
+        vent = base_dir / f"{run_base}_VentricularParameters.txt"
+        return atrial, vent
+
+    def _load_theta(self, original_csv_path: Path) -> Tuple[list, list]:
+        if self.theta_keys is None:
+            raise RuntimeError("θ keys not initialized.")
+        atrial_path, vent_path = self._parameter_paths(original_csv_path)
+        atrial_vals = self._parse_parameter_file(atrial_path)
+        vent_vals = self._parse_parameter_file(vent_path)
+
+        values = []
+        mask = []
+        for key in self.theta_keys:
+            if key in vent_vals:
+                values.append(vent_vals[key])
+                mask.append(1.0)
+            elif key in atrial_vals:
+                values.append(atrial_vals[key])
+                mask.append(1.0)
+            else:
+                values.append(0.0)
+                mask.append(0.0)
+        return values, mask
+
+    def _apply_theta_transform(self, value: float, transform: str) -> Optional[float]:
+        if transform == "none":
+            return value
+        if transform == "log":
+            return None if value <= 0 else float(np.log(value))
+        if transform == "logit":
+            if value <= 0 or value >= 1:
+                return None
+            return float(np.log(value / (1 - value)))
+        return value
+
+    def _normalize_theta(self, values: list, mask: list) -> Tuple[list, list]:
+        stats = self.theta_stats
+        if not stats:
+            return values, mask
+        means = stats["mean"]
+        stds = stats["std"]
+        transforms = stats.get("transform", ["none"] * len(values))
+        normed = []
+        norm_mask = []
+        for idx, (val, m) in enumerate(zip(values, mask)):
+            if not m:
+                normed.append(0.0)
+                norm_mask.append(0.0)
+                continue
+            transformed = self._apply_theta_transform(val, transforms[idx])
+            if transformed is None:
+                normed.append(0.0)
+                norm_mask.append(0.0)
+                continue
+            denom = stds[idx] if stds[idx] and stds[idx] > 0 else 1.0
+            normed.append((transformed - means[idx]) / denom)
+            norm_mask.append(1.0)
+        return normed, norm_mask
     
 class LVEF_12lead_reg_Dataset(Dataset):
     def __init__(self, ecg_path, labels_df, transform=None):
