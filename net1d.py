@@ -95,6 +95,25 @@ class Swish(nn.Module):
     def forward(self, x):
         return x * torch.sigmoid(x)
 
+class ConvAdapter1D(nn.Module):
+    """
+    Bottleneck residual adapter: 1x1 down -> nonlinearity -> 1x1 up, residual add.
+    Input/Output: (B, C, L)
+    """
+    def __init__(self, channels, reduction=16, dropout=0.0):
+        super().__init__()
+        hidden = max(8, channels // reduction)
+        self.down = nn.Conv1d(channels, hidden, kernel_size=1, bias=False)
+        self.act = nn.ReLU()
+        self.drop = nn.Dropout(p=dropout) if dropout and dropout > 0 else nn.Identity()
+        self.up = nn.Conv1d(hidden, channels, kernel_size=1, bias=False)
+
+        # Initialize close to identity for stability.
+        nn.init.zeros_(self.up.weight)
+
+    def forward(self, x):
+        return x + self.up(self.drop(self.act(self.down(x))))
+
 class BasicBlock(nn.Module):
     """
     Basic Block: 
@@ -232,7 +251,7 @@ class BasicStage(nn.Module):
     Basic Stage:
         block_1 -> block_2 -> ... -> block_M
     """
-    def __init__(self, in_channels, out_channels, ratio, kernel_size, stride, groups, i_stage, m_blocks, use_bn=True, use_do=True, verbose=False):
+    def __init__(self, in_channels, out_channels, ratio, kernel_size, stride, groups, i_stage, m_blocks, use_bn=True, use_do=True, verbose=False, use_adapter=False, adapter_reduction=16, adapter_dropout=0.0):
         super(BasicStage, self).__init__()
         
         self.in_channels = in_channels
@@ -245,6 +264,7 @@ class BasicStage(nn.Module):
         self.use_bn = use_bn
         self.use_do = use_do
         self.verbose = verbose
+        self.use_adapter = use_adapter
 
         self.block_list = nn.ModuleList()
         for i_block in range(self.m_blocks):
@@ -278,6 +298,8 @@ class BasicStage(nn.Module):
                 use_do=self.use_do)
             self.block_list.append(tmp_block)
 
+        self.adapter = ConvAdapter1D(self.out_channels, reduction=adapter_reduction, dropout=adapter_dropout) if self.use_adapter else nn.Identity()
+
     def forward(self, x):
 
         out = x
@@ -290,6 +312,8 @@ class BasicStage(nn.Module):
                 print('stage: {}, block: {}, conv1: {}->{} k={} s={} C={}'.format(self.i_stage, i_block, net.conv1.in_channels, net.conv1.out_channels, net.conv1.kernel_size, net.conv1.stride, net.conv1.groups))
                 print('stage: {}, block: {}, convk: {}->{} k={} s={} C={}'.format(self.i_stage, i_block, net.conv2.in_channels, net.conv2.out_channels, net.conv2.kernel_size, net.conv2.stride, net.conv2.groups))
                 print('stage: {}, block: {}, conv1: {}->{} k={} s={} C={}'.format(self.i_stage, i_block, net.conv3.in_channels, net.conv3.out_channels, net.conv3.kernel_size, net.conv3.stride, net.conv3.groups))
+
+        out = self.adapter(out)
 
         return out
 
@@ -318,7 +342,7 @@ class Net1D(nn.Module):
 
     """
 
-    def __init__(self, in_channels, base_filters, ratio, filter_list, m_blocks_list, kernel_size, stride, groups_width, n_classes, use_bn=True, use_do=True, return_features=False, verbose=False):
+    def __init__(self, in_channels, base_filters, ratio, filter_list, m_blocks_list, kernel_size, stride, groups_width, n_classes, use_bn=True, use_do=True, return_features=False, verbose=False, use_adapter=False, adapter_reduction=16, adapter_dropout=0.0):
         super(Net1D, self).__init__()
         
         self.in_channels = in_channels
@@ -335,6 +359,9 @@ class Net1D(nn.Module):
         self.use_do = use_do
         self.return_features = return_features
         self.verbose = verbose
+        self.use_adapter = use_adapter
+        self.adapter_reduction = adapter_reduction
+        self.adapter_dropout = adapter_dropout
 
         # first conv
         self.first_conv = MyConv1dPadSame(
@@ -363,7 +390,10 @@ class Net1D(nn.Module):
                 m_blocks=m_blocks, 
                 use_bn=self.use_bn, 
                 use_do=self.use_do, 
-                verbose=self.verbose)
+                verbose=self.verbose,
+                use_adapter=self.use_adapter,
+                adapter_reduction=self.adapter_reduction,
+                adapter_dropout=self.adapter_dropout)
             self.stage_list.append(tmp_stage)
             in_channels = out_channels
 
@@ -416,9 +446,11 @@ class MultiHeadECGFounder(nn.Module):
         physics_hidden=0,
         physics_dropout=0.0,
         verbose=False,
+        use_adapter=True,
+        adapter_reduction=16,
+        adapter_dropout=0.0,
     ):
         super().__init__()
-        # Shared backbone – force return_features=True
         self.backbone = Net1D(
             in_channels=in_channels,
             base_filters=base_filters,
@@ -428,11 +460,14 @@ class MultiHeadECGFounder(nn.Module):
             kernel_size=kernel_size,
             stride=stride,
             groups_width=groups_width,
-            n_classes=n_medal_classes,  # placeholder; head is replaced below
+            n_classes=n_medal_classes,
             use_bn=use_bn,
             use_do=use_do,
             return_features=True,
             verbose=verbose,
+            use_adapter=use_adapter,
+            adapter_reduction=adapter_reduction,
+            adapter_dropout=adapter_dropout,
         )
 
         feat_dim = self.backbone.dense.in_features

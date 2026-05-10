@@ -1,313 +1,302 @@
+"""Export latent features, predictions, and labels from trained ECGFounder checkpoints.
+
+Supports:
+  - Single-head Net1D (with or without adapters)  e.g. Exp 1
+  - Multi-head MultiHeadECGFounder (with or without adapters)  e.g. Exp 4, 5, 6
+
+Usage examples:
+
+  # Exp 1: PTB-XL baseline (single-head, adapter)
+  python scripts/export_latents.py ^
+    --checkpoint outputs/ptbxl_baselines/linear/ptbxl_baseline/checkpoints/linear_best.pt ^
+    --model-type single --use-adapter ^
+    --dataset ptbxl --split test ^
+    --outdir outputs/latents/exp1_ptbxl
+
+  # Exp 5: joint adapter, PTB-XL test set
+  python scripts/export_latents.py ^
+    --checkpoint outputs/joint_adapter_cls/checkpoints/linear_best.pt ^
+    --model-type multi --use-adapter ^
+    --dataset ptbxl --split test ^
+    --outdir outputs/latents/exp5_ptbxl
+
+  # Exp 5: joint adapter, MedalCare test set
+  python scripts/export_latents.py ^
+    --checkpoint outputs/joint_adapter_cls/checkpoints/linear_best.pt ^
+    --model-type multi --use-adapter ^
+    --dataset medalcare --split test ^
+    --outdir outputs/latents/exp5_medalcare
+"""
+
 import argparse
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-import wfdb
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from net1d import Net1D
+from net1d import Net1D, MultiHeadECGFounder
+from scripts.datasets import get_dataset
 
+DEFAULT_PTBXL_ROOT = (
+    REPO_ROOT
+    / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
+)
+DEFAULT_MEDAL_MANIFEST = (
+    REPO_ROOT / "data" / "medalcare_filtered_manifest_dataset_split.csv"
+)
 
-@dataclass
-class HeadSpec:
-    head_type: str
-    output_dim: int
-    hidden_dim: Optional[int] = None
-
-
-class DenseInputHook:
-    def __init__(self, module: nn.Module) -> None:
-        self._buffer: Optional[torch.Tensor] = None
-        self._handle = module.register_forward_hook(self._hook)
-
-    def _hook(self, module: nn.Module, inputs: Tuple[torch.Tensor, ...], output: torch.Tensor) -> None:  # pragma: no cover - hook signature
-        if not inputs:
-            self._buffer = None
-        else:
-            self._buffer = inputs[0].detach()
-
-    def pop(self) -> torch.Tensor:
-        if self._buffer is None:
-            raise RuntimeError("Latent features were not captured for the latest batch.")
-        features = self._buffer
-        self._buffer = None
-        return features
-
-    def close(self) -> None:
-        self._handle.remove()
-
-
-class ECGWaveformDataset(Dataset):
-    def __init__(
-        self,
-        dataframe: pd.DataFrame,
-        n_classes: int,
-        label_columns: Sequence[str],
-        base_dir: Path,
-    ) -> None:
-        self.df = dataframe.reset_index(drop=True)
-        self.n_classes = n_classes
-        self.label_columns = list(label_columns)
-        self.base_dir = base_dir
-        self.input_leads = ["I", "II", "III", "aVR", "aVF", "aVL", "V1", "V2", "V3", "V4", "V5", "V6"]
-        self.new_leads = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
-        self.lead_indices = [self.input_leads.index(lead) for lead in self.new_leads]
-
-    def __len__(self) -> int:
-        return len(self.df)
-
-    def _resolve_wfdb_path(self, raw_path: str) -> Path:
-        wfdb_path = Path(raw_path)
-        if wfdb_path.is_absolute():
-            return wfdb_path
-        return (self.base_dir / wfdb_path).resolve()
-
-    def _normalise(self, signal: np.ndarray) -> np.ndarray:
-        mean = signal.mean()
-        std = signal.std()
-        return (signal - mean) / (std + 1e-8)
-
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        row = self.df.iloc[index]
-        wfdb_path = self._resolve_wfdb_path(str(row["wfdb_path"]))
-        try:
-            signal_matrix, _ = wfdb.rdsamp(str(wfdb_path))
-        except Exception as exc:  # pragma: no cover - relies on runtime data
-            raise RuntimeError(f"Failed to load WFDB record at {wfdb_path}") from exc
-
-        signal_matrix = np.nan_to_num(signal_matrix, nan=0.0)
-        signal_matrix = signal_matrix.T  # (leads, time)
-        signal_matrix = signal_matrix[self.lead_indices, :]
-        signal_matrix = self._normalise(signal_matrix)
-        signal_tensor = torch.from_numpy(signal_matrix.astype(np.float32))
-
-        if self.label_columns:
-            labels = row[self.label_columns].to_numpy(dtype=np.float32)
-        else:
-            labels = np.zeros(self.n_classes, dtype=np.float32)
-        label_tensor = torch.from_numpy(labels)
-        return signal_tensor, label_tensor
+NET1D_ARCH = dict(
+    in_channels=12,
+    base_filters=64,
+    ratio=1,
+    filter_list=[64, 160, 160, 400, 400, 1024, 1024],
+    m_blocks_list=[2, 2, 2, 3, 3, 4, 4],
+    kernel_size=16,
+    stride=2,
+    groups_width=16,
+    verbose=False,
+    use_bn=False,
+    use_do=False,
+)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Export latent features and predictions for ECGFounder checkpoints."
+    p = argparse.ArgumentParser(
+        description="Export latent features from trained ECGFounder checkpoints.",
     )
-    parser.add_argument("--checkpoint", type=Path, required=True, help="Path to model checkpoint (.pt/.pth).")
-    parser.add_argument("--manifest", type=Path, required=True, help="Path to manifest CSV describing records.")
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="all",
-        choices=("train", "val", "test", "all"),
-        help="Subset of the manifest to export. Use 'all' to keep every row.",
+    p.add_argument(
+        "--checkpoint", type=Path, required=True,
+        help="Path to fine-tuned checkpoint (.pt/.pth).",
     )
-    parser.add_argument("--outdir", type=Path, required=True, help="Directory to store latents and indexes.")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size for inference.")
-    parser.add_argument("--num-workers", type=int, default=0, help="Number of DataLoader workers (0 on Windows).")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default=None,
-        help="Computation device (e.g. 'cuda', 'cuda:0', 'cpu'). Defaults to CUDA if available.",
+    p.add_argument(
+        "--model-type", choices=["single", "multi"], required=True,
+        help="'single' = Net1D, 'multi' = MultiHeadECGFounder.",
     )
-    return parser.parse_args()
-
-
-def load_manifest(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"Manifest not found: {path}")
-    df = pd.read_csv(path)
-    if "wfdb_path" not in df.columns:
-        raise ValueError("Manifest must contain a 'wfdb_path' column.")
-    return df
-
-
-def filter_manifest(df: pd.DataFrame, split: str) -> pd.DataFrame:
-    if split == "all":
-        return df.copy()
-    if "split" not in df.columns:
-        raise ValueError("Manifest is missing 'split' column; cannot filter by split.")
-    mask = df["split"].astype(str).str.lower() == split.lower()
-    subset = df.loc[mask].copy()
-    if subset.empty:
-        raise ValueError(f"No records found for split='{split}'.")
-    return subset
-
-
-def strip_module_prefix(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-    clean_state = {}
-    for key, value in state_dict.items():
-        if key.startswith("module."):
-            clean_state[key[len("module."):]] = value
-        else:
-            clean_state[key] = value
-    return clean_state
-
-
-def infer_head_spec(state_dict: Dict[str, torch.Tensor]) -> HeadSpec:
-    if "dense.weight" in state_dict and "dense.bias" in state_dict:
-        output_dim = state_dict["dense.weight"].shape[0]
-        return HeadSpec(head_type="linear", output_dim=output_dim)
-    if "dense.2.weight" in state_dict and "dense.2.bias" in state_dict and "dense.0.weight" in state_dict:
-        output_dim = state_dict["dense.2.weight"].shape[0]
-        hidden_dim = state_dict["dense.0.weight"].shape[0]
-        return HeadSpec(head_type="mlp", output_dim=output_dim, hidden_dim=hidden_dim)
-    raise ValueError("Unable to infer head structure from checkpoint state_dict.")
-
-
-def build_model(head_spec: HeadSpec, device: torch.device) -> Net1D:
-    model = Net1D(
-        in_channels=12,
-        base_filters=64,
-        ratio=1,
-        filter_list=[64, 160, 160, 400, 400, 1024, 1024],
-        m_blocks_list=[2, 2, 2, 3, 3, 4, 4],
-        kernel_size=16,
-        stride=2,
-        groups_width=16,
-        verbose=False,
-        use_bn=False,
-        use_do=False,
-        n_classes=head_spec.output_dim,
+    p.add_argument(
+        "--use-adapter", action="store_true",
+        help="Enable adapter layers in the model.",
     )
-    in_features = model.dense.in_features
-    if head_spec.head_type == "mlp":
-        if head_spec.hidden_dim is None:
-            raise ValueError("Missing hidden dimension for MLP head.")
-        model.dense = nn.Sequential(
-            nn.Linear(in_features, head_spec.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(head_spec.hidden_dim, head_spec.output_dim),
-        )
-    elif head_spec.head_type == "linear":
-        model.dense = nn.Linear(in_features, head_spec.output_dim)
-    else:  # pragma: no cover - safeguarded by infer_head_spec
-        raise ValueError(f"Unsupported head type: {head_spec.head_type}")
-    model.to(device)
+    p.add_argument(
+        "--dataset", choices=["ptbxl", "medalcare"], required=True,
+        help="Dataset to export latents for.",
+    )
+    p.add_argument(
+        "--ptbxl-root", type=Path, default=DEFAULT_PTBXL_ROOT,
+        help="PTB-XL root directory.",
+    )
+    p.add_argument(
+        "--manifest", type=Path, default=DEFAULT_MEDAL_MANIFEST,
+        help="MedalCare manifest CSV (must contain 'split' column).",
+    )
+    p.add_argument(
+        "--split", type=str, default="test",
+        choices=["train", "val", "test", "all"],
+        help="Data split to export (default: test).",
+    )
+    p.add_argument("--outdir", type=Path, required=True,
+                    help="Output directory for the NPZ file.")
+    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--device", type=str, default=None)
+    return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Model construction
+# ---------------------------------------------------------------------------
+
+def _load_state_dict(checkpoint_path: Path, device: torch.device) -> dict:
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        return ckpt["state_dict"]
+    if isinstance(ckpt, dict):
+        return ckpt
+    raise ValueError(f"Unsupported checkpoint format in {checkpoint_path}")
+
+
+def _infer_n_classes(sd: dict, model_type: str, dataset: str) -> int:
+    if model_type == "single":
+        if "dense.weight" in sd:
+            return sd["dense.weight"].shape[0]
+        raise ValueError("Cannot infer n_classes: 'dense.weight' not in checkpoint.")
+    key = "head_ptb.weight" if dataset == "ptbxl" else "head_medal.weight"
+    if key in sd:
+        return sd[key].shape[0]
+    raise ValueError(f"Cannot infer n_classes: '{key}' not in checkpoint.")
+
+
+def build_single_head(
+    sd: dict, device: torch.device, n_classes: int, use_adapter: bool,
+) -> Net1D:
+    model = Net1D(**NET1D_ARCH, n_classes=n_classes, use_adapter=use_adapter)
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    if missing:
+        print(f"  [WARN] Missing keys ({len(missing)}): {missing[:5]}...")
+    if unexpected:
+        print(f"  [WARN] Unexpected keys ({len(unexpected)}): {unexpected[:5]}...")
+    model.return_features = True
+    model.to(device).eval()
     return model
 
 
-def collect_arrays(
-    model: Net1D,
+def build_multi_head(
+    sd: dict, device: torch.device, use_adapter: bool,
+) -> MultiHeadECGFounder:
+    n_medal = sd["head_medal.weight"].shape[0]
+    n_ptb = sd["head_ptb.weight"].shape[0]
+    model = MultiHeadECGFounder(
+        **NET1D_ARCH,
+        n_medal_classes=n_medal,
+        n_ptb_classes=n_ptb,
+        use_adapter=use_adapter,
+    )
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    if missing:
+        print(f"  [WARN] Missing keys ({len(missing)}): {missing[:5]}...")
+    if unexpected:
+        print(f"  [WARN] Unexpected keys ({len(unexpected)}): {unexpected[:5]}...")
+    model.to(device).eval()
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
+
+def make_loader(
+    dataset_name: str,
+    split: str,
+    ptbxl_root: Path,
+    manifest_path: Path,
+    batch_size: int,
+    num_workers: int,
+    device: torch.device,
+) -> Tuple[DataLoader, int]:
+    if dataset_name == "ptbxl":
+        ds = get_dataset("ptbxl", root=ptbxl_root, split=split,
+                         return_metadata=False)
+    else:
+        df = pd.read_csv(manifest_path)
+        if "split" in df.columns and split != "all":
+            df = df[df["split"].str.lower() == split.lower()].copy()
+        ds = get_dataset("medalcare", ecg_path="", labels_df=df)
+
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=(device.type == "cuda"),
+    )
+    return loader, len(ds)
+
+
+# ---------------------------------------------------------------------------
+# Feature extraction
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def extract(
+    model: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
-    expect_labels: bool,
-    feature_hook: DenseInputHook,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-    model.eval()
-    latent_batches: List[np.ndarray] = []
-    prob_batches: List[np.ndarray] = []
-    label_batches: List[np.ndarray] = []
-    with torch.no_grad():
-        for signals, labels in tqdm(loader, desc="Exporting", leave=False):
-            signals = signals.to(device, non_blocking=True)
-            logits = model(signals)
-            features = feature_hook.pop()
-            latent_batches.append(features.cpu().numpy())
-            probabilities = torch.sigmoid(logits)
-            prob_batches.append(probabilities.cpu().numpy())
-            if expect_labels:
-                label_batches.append(labels.cpu().numpy())
-    z_array = np.concatenate(latent_batches, axis=0) if latent_batches else np.zeros((0, 0), dtype=np.float32)
-    p_array = np.concatenate(prob_batches, axis=0) if prob_batches else np.zeros((0, 0), dtype=np.float32)
-    y_array = None
-    if expect_labels and label_batches:
-        y_array = np.concatenate(label_batches, axis=0)
-    return z_array, p_array, y_array
+    model_type: str,
+    task: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    z_parts, p_parts, y_parts = [], [], []
 
+    for batch in tqdm(loader, desc="Exporting", leave=False):
+        signals = batch[0].to(device, non_blocking=True)
+        labels = batch[1]
+
+        if model_type == "single":
+            logits, features = model(signals)
+        else:
+            logits, features = model(signals, task=task, return_features=True)
+
+        z_parts.append(features.cpu().numpy())
+        p_parts.append(torch.sigmoid(logits).cpu().numpy())
+        y_parts.append(labels.numpy() if isinstance(labels, torch.Tensor) else labels)
+
+    Z = np.concatenate(z_parts, axis=0)
+    P = np.concatenate(p_parts, axis=0)
+    Y = np.concatenate(y_parts, axis=0)
+    return Z, P, Y
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     args = parse_args()
     device = torch.device(
-        args.device if args.device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
-    print(f"Using device: {device}")
+    print(f"Device: {device}")
+    print(f"Checkpoint: {args.checkpoint}")
+    print(f"Model type: {args.model_type} | adapter: {args.use_adapter}")
+    print(f"Dataset: {args.dataset} | split: {args.split}")
 
-    checkpoint_obj = torch.load(args.checkpoint, map_location=device)
-    if isinstance(checkpoint_obj, dict) and "state_dict" in checkpoint_obj:
-        state_dict = checkpoint_obj["state_dict"]
-    elif isinstance(checkpoint_obj, dict):
-        state_dict = checkpoint_obj
+    # Load state dict once
+    sd = _load_state_dict(args.checkpoint, device)
+    n_classes = _infer_n_classes(sd, args.model_type, args.dataset)
+    print(f"Inferred n_classes = {n_classes}")
+
+    # Build model
+    if args.model_type == "single":
+        model = build_single_head(sd, device, n_classes, args.use_adapter)
     else:
-        raise ValueError("Unsupported checkpoint format. Expected a dict with 'state_dict'.")
-    state_dict = strip_module_prefix(state_dict)
+        model = build_multi_head(sd, device, args.use_adapter)
 
-    head_spec = infer_head_spec(state_dict)
-    model = build_model(head_spec, device)
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-    if missing or unexpected:
-        raise RuntimeError(f"Checkpoint load mismatch. Missing: {missing}, Unexpected: {unexpected}")
-
-    manifest_df = load_manifest(args.manifest)
-    subset_df = filter_manifest(manifest_df, args.split)
-    subset_df = subset_df.reset_index(drop=True)
-    print(f"Loaded {len(subset_df)} records from split '{args.split}'.")
-
-    label_columns = [col for col in subset_df.columns if col.startswith("label_")]
-    has_labels = len(label_columns) > 0
-
-    dataset = ECGWaveformDataset(
-        dataframe=subset_df,
-        n_classes=head_spec.output_dim,
-        label_columns=label_columns,
-        base_dir=args.manifest.parent.resolve(),
+    # Build loader
+    task = args.dataset  # medalcare → head_medal, ptbxl → head_ptb
+    loader, n_samples = make_loader(
+        args.dataset, args.split, args.ptbxl_root, args.manifest,
+        args.batch_size, args.num_workers, device,
     )
-    feature_hook = DenseInputHook(model.dense)
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-    )
+    print(f"Samples: {n_samples}")
 
-    try:
-        z_array, p_array, y_array = collect_arrays(model, loader, device, has_labels, feature_hook)
-    finally:
-        feature_hook.close()
-    if z_array.shape[0] != len(subset_df):
-        raise RuntimeError(
-            f"Mismatch between exported features ({z_array.shape[0]}) and manifest rows ({len(subset_df)})."
+    # Extract
+    Z, P, Y = extract(model, loader, device, args.model_type, task)
+    print(f"Shapes — Z: {Z.shape}, P: {P.shape}, Y: {Y.shape}")
+
+    if Z.shape[0] != n_samples:
+        print(f"[WARN] Expected {n_samples} rows, got {Z.shape[0]}")
+
+    # Assemble NPZ payload
+    payload = {"Z": Z, "P": P, "Y": Y}
+
+    # For MedalCare, include theta columns from manifest if present
+    if args.dataset == "medalcare":
+        df = pd.read_csv(args.manifest)
+        if "split" in df.columns and args.split != "all":
+            df = df[df["split"].str.lower() == args.split.lower()].copy()
+            df = df.reset_index(drop=True)
+        theta_cols = sorted(
+            c for c in df.columns if c.lower().startswith("theta")
         )
+        if theta_cols:
+            payload["Theta"] = df[theta_cols].to_numpy(dtype=np.float32)
+            print(f"Included {len(theta_cols)} theta columns from manifest")
 
-    theta_raw_cols = [col for col in subset_df.columns if col.lower().startswith("theta_raw")]
-    theta_cols = [col for col in subset_df.columns if col.lower().startswith("theta") and col not in theta_raw_cols]
-
-    export_dir = args.outdir.resolve()
-    export_dir.mkdir(parents=True, exist_ok=True)
-
-    latents_payload = {"Z": z_array, "P": p_array}
-    if has_labels and y_array is not None:
-        latents_payload["Y"] = y_array
-    if theta_raw_cols:
-        latents_payload["Theta_raw"] = subset_df[theta_raw_cols].to_numpy()
-    if theta_cols:
-        latents_payload["Theta"] = subset_df[theta_cols].to_numpy()
-
-    npz_path = export_dir / "latents.npz"
-    np.savez_compressed(npz_path, **latents_payload)
-    print(f"Wrote latent arrays to {npz_path}")
-
-    index_columns_to_drop = label_columns
-    index_df = subset_df.drop(columns=index_columns_to_drop, errors="ignore")
-    index_path = export_dir / "index.csv"
-    index_df.to_csv(index_path, index=False)
-    print(f"Wrote index with metadata to {index_path}")
+    # Save
+    out_dir = args.outdir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    npz_path = out_dir / "latents.npz"
+    np.savez_compressed(npz_path, **payload)
+    print(f"Saved {npz_path}  ({npz_path.stat().st_size / 1024:.0f} KB)")
 
 
 if __name__ == "__main__":
     main()
-

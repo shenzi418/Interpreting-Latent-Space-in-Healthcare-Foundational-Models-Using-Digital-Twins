@@ -27,6 +27,7 @@ from scripts.datasets import (  # pylint: disable=wrong-import-position
 from finetune_model import (  # pylint: disable=wrong-import-position
     ft_12lead_ECGFounder,
     ft_multihead_ECGFounder,
+    freeze_backbone_except_adapters,
 )
 from metrics import AVAILABLE_METRICS, compute_multilabel_metrics  # pylint: disable=wrong-import-position
 from losses.mmd import mmd_rbf  # pylint: disable=wrong-import-position
@@ -41,6 +42,44 @@ DEFAULT_PTBXL_ROOT = (
 PTBXL_OUTPUT_ROOT = REPO_ROOT / "outputs" / "ptbxl_baselines"
 DATASET_CHOICES = ("medalcare", "ptbxl")
 JOINT_CHOICES = ("medalcare+ptbxl",)
+
+# ---------------------------------------------------------------------------
+# Exp 7: Shared-head label remapping (3-class: NORM, MI, CD)
+# ---------------------------------------------------------------------------
+SHARED_LABELS: Tuple[str, ...] = ("NORM", "MI", "CD")
+N_SHARED: int = 3
+
+MEDALCARE_REMAP: Dict[int, int] = {0: 0, 1: 1, 2: 2, 3: 2, 5: 2, 7: 2}
+PTBXL_REMAP: Dict[int, int] = {0: 0, 1: 1, 4: 2}
+
+MEDALCARE_KEEP_LABELS: Tuple[int, ...] = (0, 1, 2, 3, 5, 7)
+MEDALCARE_DROP_LABELS: Tuple[int, ...] = (4, 6)  # lae, fam
+
+
+def remap_labels(
+    labels: torch.Tensor,
+    remap_dict: Dict[int, int],
+    n_shared: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Remap a multi-label tensor from the original class space to the shared space.
+
+    Args:
+        labels: (B, C_original) binary label tensor.
+        remap_dict: mapping from source column index to target column index.
+        n_shared: number of target classes.
+        device: torch device for the output tensor.
+
+    Returns:
+        (B, n_shared) binary label tensor in the shared class space.
+    """
+    batch_size = labels.shape[0]
+    shared = torch.zeros(batch_size, n_shared, device=device)
+    for src_idx, tgt_idx in remap_dict.items():
+        shared[:, tgt_idx] = torch.clamp(
+            shared[:, tgt_idx] + labels[:, src_idx], max=1.0
+        )
+    return shared
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,8 +163,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--metrics",
         type=str,
-        default="ap,brier,roc_auc",
+        default="accuracy,f1,recall,specificity,precision,brier,roc_auc",
         help=f"Comma-separated list of metrics to compute. Supported: {', '.join(AVAILABLE_METRICS)}",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Decision threshold for converting predicted probabilities to binary labels (default: 0.5).",
     )
     parser.add_argument(
         "--linear-probe",
@@ -157,6 +202,16 @@ def parse_args() -> argparse.Namespace:
         "--freeze-encoder",
         action="store_true",
         help="Freeze the encoder/backbone parameters and only train the head.",
+    )
+    parser.add_argument(
+        "--use-adapter",
+        action="store_true",
+        help="Enable stage-level residual adapters in the single-head encoder (default: off).",
+    )
+    parser.add_argument(
+        "--no-adapter",
+        action="store_true",
+        help="Disable adapters in the multi-head model (default: adapters on for multi-head).",
     )
     parser.add_argument(
         "--head-type",
@@ -276,6 +331,26 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="domain",
         help="Manifest column indicating domain labels for MMD (default: 'domain').",
+    )
+    parser.add_argument(
+        "--shared-head",
+        action="store_true",
+        help="Exp 7: use a single shared classification head (3 classes: NORM, MI, CD) "
+             "for both MedalCare and PTB-XL. Requires both datasets.",
+    )
+    parser.add_argument(
+        "--dual-head-shared-labels",
+        action="store_true",
+        help="Pre-Phase-B redo (supervisor 2026-04-29): joint dual-head training "
+             "(separate MedalCare/PTB-XL heads, both sized to 3 = NORM/MI/CD) using "
+             "the same MedalCare/PTB-XL filtering and label remapping as --shared-head. "
+             "Use --lambda-mmd 0 for the exp5_3class baseline; use --lambda-mmd 0.1 "
+             "--class-cond-mmd for the exp6_3class ccmmd variant.",
+    )
+    parser.add_argument(
+        "--class-cond-mmd",
+        action="store_true",
+        help="Use class-conditional MMD instead of class-agnostic MMD (Exp 7-ccmmd).",
     )
     return parser.parse_args()
 
@@ -568,6 +643,101 @@ def build_ptbxl_loaders(
         },
     )
 
+
+# ---------------------------------------------------------------------------
+# Exp 7: Shared-head data loading with sample filtering
+# ---------------------------------------------------------------------------
+
+def _filter_medalcare_manifest(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop MedalCare rows whose only positive label is in MEDALCARE_DROP_LABELS (lae, fam)."""
+    keep_cols = [f"label_{i}" for i in MEDALCARE_KEEP_LABELS]
+    mask = df[keep_cols].sum(axis=1) > 0
+    filtered = df[mask].reset_index(drop=True)
+    n_dropped = len(df) - len(filtered)
+    print(f"[shared-head] MedalCare filtering: {len(df)} -> {len(filtered)} ({n_dropped} dropped)")
+    return filtered
+
+
+def _filter_ptbxl_dataset(dataset: PTBXLDataset) -> PTBXLDataset:
+    """Drop PTB-XL samples whose only positive superclass labels are STTC/HYP."""
+    targets = dataset.targets  # (N, 5)
+    keep_indices = [idx for src, idx in PTBXL_REMAP.items()]  # columns 0, 1, 4
+    keep_mask = np.any(targets[:, keep_indices] > 0, axis=1)
+    n_before = len(dataset.records)
+    dataset.records = dataset.records[keep_mask].reset_index(drop=True)
+    dataset.targets = targets[keep_mask]
+    n_after = len(dataset.records)
+    print(f"[shared-head] PTB-XL filtering: {n_before} -> {n_after} ({n_before - n_after} dropped)")
+    return dataset
+
+
+def build_shared_head_loaders(
+    args: argparse.Namespace,
+) -> dict:
+    """Build MedalCare + PTB-XL loaders with sample filtering for shared-head training."""
+    # --- MedalCare ---
+    manifest = ensure_manifest(args.manifest)
+    train_df, val_df, test_df = prepare_splits(manifest, args.ignore_splits)
+    train_df = _filter_medalcare_manifest(train_df)
+    val_df = _filter_medalcare_manifest(val_df)
+    test_df = _filter_medalcare_manifest(test_df)
+
+    medal_train = make_dataloader(train_df, args.batch_size, args.num_workers, shuffle=True)
+    medal_val = make_dataloader(val_df, args.batch_size, args.num_workers, shuffle=False)
+    medal_test = make_dataloader(test_df, args.batch_size, args.num_workers, shuffle=False)
+
+    label_cols_8 = [col for col in train_df.columns if col.startswith("label_")]
+    medal_pos_8 = train_df[label_cols_8].sum(axis=0).to_numpy()
+    medal_train_n = len(train_df)
+
+    # Compute remapped pos counts for combined pos_weight
+    medal_pos_shared = np.zeros(N_SHARED, dtype=np.float64)
+    for src_idx, tgt_idx in MEDALCARE_REMAP.items():
+        col = f"label_{src_idx}"
+        if col in train_df.columns:
+            medal_pos_shared[tgt_idx] += train_df[col].sum()
+
+    # --- PTB-XL ---
+    dataset_kwargs = dict(
+        root=args.ptbxl_root,
+        sampling_rate=500,
+        signal_duration=10.0,
+        use_high_res=True,
+        return_metadata=False,
+    )
+    ptb_train_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="train", **dataset_kwargs))
+    ptb_val_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="val", **dataset_kwargs))
+    ptb_test_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="test", **dataset_kwargs))
+
+    ptb_train = make_ptbxl_loader(ptb_train_ds, args.batch_size, args.num_workers, shuffle=True)
+    ptb_val = make_ptbxl_loader(ptb_val_ds, args.batch_size, args.num_workers, shuffle=False)
+    ptb_test = make_ptbxl_loader(ptb_test_ds, args.batch_size, args.num_workers, shuffle=False)
+
+    ptb_train_n = len(ptb_train_ds)
+    # Compute remapped pos counts
+    ptb_pos_shared = np.zeros(N_SHARED, dtype=np.float64)
+    for src_idx, tgt_idx in PTBXL_REMAP.items():
+        ptb_pos_shared[tgt_idx] += ptb_train_ds.targets[:, src_idx].sum()
+
+    # --- Combined pos_weight ---
+    combined_pos = medal_pos_shared + ptb_pos_shared
+    combined_total = medal_train_n + ptb_train_n
+    combined_neg = combined_total - combined_pos
+    pos_weight_arr = combined_neg / np.clip(combined_pos, 1e-6, None)
+
+    print(f"[shared-head] Combined train: MedalCare {medal_train_n} + PTB-XL {ptb_train_n} = {combined_total}")
+    for i, name in enumerate(SHARED_LABELS):
+        print(f"  {name}: pos={combined_pos[i]:.0f}, neg={combined_neg[i]:.0f}, weight={pos_weight_arr[i]:.3f}")
+
+    return {
+        "medal": {"train": medal_train, "val": medal_val, "test": medal_test},
+        "ptb": {"train": ptb_train, "val": ptb_val, "test": ptb_test},
+        "pos_weight": pos_weight_arr,
+        "medal_train_n": medal_train_n,
+        "ptb_train_n": ptb_train_n,
+    }
+
+
 def train_one_epoch(
     model: torch.nn.Module,
     loader: DataLoader,
@@ -641,6 +811,7 @@ def evaluate_model(
     device: torch.device,
     metrics_to_compute: List[str],
     task: Optional[str] = None,
+    threshold: float = 0.5,
 ) -> Optional[Dict[str, object]]:
     if loader.dataset is None or len(loader.dataset) == 0:
         return None
@@ -664,7 +835,7 @@ def evaluate_model(
 
     y_pred = np.concatenate(preds, axis=0)
     y_true = np.concatenate(targets, axis=0)
-    metrics = compute_multilabel_metrics(y_true, y_pred, metrics_to_compute)
+    metrics = compute_multilabel_metrics(y_true, y_pred, metrics_to_compute, threshold=threshold)
     return {
         "y_true": y_true,
         "y_pred": y_pred,
@@ -891,8 +1062,19 @@ def save_physics_plots(
         plt.close()
 
 
+_PRIMARY_METRIC_PREFERENCE = ("f1", "roc_auc", "accuracy", "recall")
+
+
 def select_primary_metric(metrics: Dict[str, object], candidates: List[str]) -> Tuple[str, Optional[float]]:
     macro = metrics["metrics"]["macro"]
+    # Try the preferred ordering first (only consider metrics the user asked for).
+    available = set(candidates)
+    for name in _PRIMARY_METRIC_PREFERENCE:
+        if name in available:
+            value = macro.get(name)
+            if value is not None:
+                return name, value
+    # Fall back to the first candidate with a value.
     for name in candidates:
         value = macro.get(name)
         if value is not None:
@@ -975,6 +1157,669 @@ def select_top_theta_indices(
     return [idx for idx, _ in candidates[:top_k]]
 
 
+def _evaluate_shared_head(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    remap_dict: Dict[int, int],
+    device: torch.device,
+    metrics_to_compute: List[str],
+    label_smoothing: float,
+    threshold: float = 0.5,
+) -> Optional[Dict[str, object]]:
+    """Evaluate the shared-head model on one domain, remapping labels to the shared space."""
+    if loader.dataset is None or len(loader.dataset) == 0:
+        return None
+    model.eval()
+    preds_list: List[np.ndarray] = []
+    targets_list: List[np.ndarray] = []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="Evaluating", leave=False):
+            inputs = batch[0].to(device, non_blocking=True)
+            labels_orig = batch[1].to(device, non_blocking=True)
+            labels_shared = remap_labels(labels_orig, remap_dict, N_SHARED, device)
+            logits = model(inputs)
+            preds_list.append(torch.sigmoid(logits).cpu().numpy())
+            targets_list.append(labels_shared.cpu().numpy())
+    if not preds_list:
+        return None
+    y_pred = np.concatenate(preds_list, axis=0)
+    y_true = np.concatenate(targets_list, axis=0)
+    metrics = compute_multilabel_metrics(y_true, y_pred, metrics_to_compute, threshold=threshold)
+    return {"y_true": y_true, "y_pred": y_pred, "metrics": metrics}
+
+
+def _run_shared_head(args: argparse.Namespace) -> None:
+    """Exp 7: Shared-head joint training on 3 overlapping classes (NORM, MI, CD)."""
+    set_deterministic(args.seed)
+    metrics_to_compute = validate_metrics(args.metrics.split(","))
+    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    outputs_dir = (DEFAULT_OUTPUTS / run_id).resolve()
+    checkpoints_dir = outputs_dir / "checkpoints"
+    tensors_dir = outputs_dir / "tensors"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    if args.log_tensors:
+        tensors_dir.mkdir(parents=True, exist_ok=True)
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    print(f"[Exp 7] Shared-head training with {N_SHARED} classes: {SHARED_LABELS}")
+
+    # ---- Data ----
+    loader_bundle = build_shared_head_loaders(args)
+    medal_train = loader_bundle["medal"]["train"]
+    medal_val = loader_bundle["medal"]["val"]
+    medal_test = loader_bundle["medal"]["test"]
+    ptb_train = loader_bundle["ptb"]["train"]
+    ptb_val = loader_bundle["ptb"]["val"]
+    ptb_test = loader_bundle["ptb"]["test"]
+    pos_weight_arr = loader_bundle["pos_weight"]
+
+    # ---- Model (single-head Net1D with adapters) ----
+    model = ft_12lead_ECGFounder(
+        device=device,
+        pth=str(args.checkpoint),
+        n_classes=N_SHARED,
+        linear_prob=False,
+        use_adapter=True,
+        adapter_reduction=16,
+        adapter_dropout=0.0,
+    )
+    freeze_backbone_except_adapters(model)
+    for p in model.dense.parameters():
+        p.requires_grad = True
+
+    head_params = [p for p in model.dense.parameters() if p.requires_grad]
+    encoder_params = [
+        p for n, p in model.named_parameters()
+        if not n.startswith("dense") and p.requires_grad
+    ]
+    param_groups = []
+    if head_params:
+        param_groups.append({"params": head_params, "lr": args.lr_head})
+    if encoder_params:
+        param_groups.append({"params": encoder_params, "lr": args.lr_encoder})
+    if not param_groups:
+        raise ValueError("No trainable parameters found.")
+
+    n_head = sum(p.numel() for p in head_params)
+    n_adapter = sum(p.numel() for p in encoder_params)
+    print(f"Trainable params: head={n_head:,}, adapters={n_adapter:,}, total={n_head + n_adapter:,}")
+
+    # ---- Loss / Optimizer / Scheduler ----
+    pos_weight_tensor = torch.tensor(pos_weight_arr, dtype=torch.float32, device=device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+    optimizer = optim.Adam(param_groups, weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, patience=3, factor=0.5, mode="max"
+    )
+
+    # ---- Training loop ----
+    metrics_log: List[Dict[str, object]] = []
+    per_class_records: List[Dict[str, object]] = []
+    best_snapshot: Optional[Dict[str, object]] = None
+    best_val_score = float("-inf")
+
+    for epoch in range(1, args.epochs + 1):
+        print(f"\nEpoch {epoch}/{args.epochs}")
+        model.train()
+        steps = min(len(medal_train), len(ptb_train))
+        running_loss_medal = 0.0
+        running_loss_ptb = 0.0
+        samples_medal = 0
+        samples_ptb = 0
+        running_mmd = 0.0
+        mmd_batches = 0
+
+        for batch_medal, batch_ptb in tqdm(
+            zip(medal_train, ptb_train), total=steps, desc="Training", leave=False
+        ):
+            medal_inputs, medal_labels_8 = batch_medal[0], batch_medal[1]
+            ptb_inputs, ptb_labels_5 = batch_ptb[0], batch_ptb[1]
+
+            medal_inputs = medal_inputs.to(device, non_blocking=True)
+            ptb_inputs = ptb_inputs.to(device, non_blocking=True)
+            medal_labels_8 = medal_labels_8.to(device, non_blocking=True)
+            ptb_labels_5 = ptb_labels_5.to(device, non_blocking=True)
+
+            medal_labels = remap_labels(medal_labels_8, MEDALCARE_REMAP, N_SHARED, device)
+            ptb_labels = remap_labels(ptb_labels_5, PTBXL_REMAP, N_SHARED, device)
+
+            if args.label_smoothing > 0.0:
+                medal_labels = medal_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
+                ptb_labels = ptb_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
+
+            optimizer.zero_grad()
+
+            logits_medal = model(medal_inputs)
+            feat_medal = model.last_features
+            logits_ptb = model(ptb_inputs)
+            feat_ptb = model.last_features
+
+            loss_medal = criterion(logits_medal, medal_labels)
+            loss_ptb = criterion(logits_ptb, ptb_labels)
+            loss = loss_medal + loss_ptb
+
+            if args.lambda_mmd > 0.0 and feat_medal.size(0) > 1 and feat_ptb.size(0) > 1:
+                if args.class_cond_mmd:
+                    from losses.mmd import mmd_rbf_class_conditional
+                    mmd_value = mmd_rbf_class_conditional(
+                        feat_medal, feat_ptb, medal_labels, ptb_labels
+                    )
+                else:
+                    mmd_value = mmd_rbf(feat_medal, feat_ptb)
+                loss = loss + args.lambda_mmd * mmd_value
+                running_mmd += mmd_value.item()
+                mmd_batches += 1
+
+            loss.backward()
+            if args.grad_clip and args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            optimizer.step()
+
+            b_m = medal_inputs.size(0)
+            b_p = ptb_inputs.size(0)
+            running_loss_medal += loss_medal.item() * b_m
+            running_loss_ptb += loss_ptb.item() * b_p
+            samples_medal += b_m
+            samples_ptb += b_p
+
+        avg_loss_medal = running_loss_medal / max(samples_medal, 1)
+        avg_loss_ptb = running_loss_ptb / max(samples_ptb, 1)
+        avg_mmd = running_mmd / mmd_batches if mmd_batches > 0 else None
+        print(f"Training loss -> MedalCare: {avg_loss_medal:.6f}, PTB-XL: {avg_loss_ptb:.6f}")
+        if avg_mmd is not None:
+            print(f"Average MMD: {avg_mmd:.6f}")
+
+        # ---- Validation ----
+        val_medal = _evaluate_shared_head(
+            model, medal_val, MEDALCARE_REMAP, device, metrics_to_compute,
+            args.label_smoothing, args.threshold,
+        )
+        val_ptb = _evaluate_shared_head(
+            model, ptb_val, PTBXL_REMAP, device, metrics_to_compute,
+            args.label_smoothing, args.threshold,
+        )
+        if val_medal is None or val_ptb is None:
+            raise RuntimeError("Validation split is empty – cannot continue.")
+
+        val_summary_medal = summarise_macro(val_medal, metrics_to_compute)
+        val_summary_ptb = summarise_macro(val_ptb, metrics_to_compute)
+        print(
+            "Validation macro -> "
+            f"MedalCare: {macro_summary_str(val_summary_medal)}, "
+            f"PTB-XL: {macro_summary_str(val_summary_ptb)}"
+        )
+
+        _, medal_f1 = select_primary_metric(val_medal, metrics_to_compute)
+        _, ptb_f1 = select_primary_metric(val_ptb, metrics_to_compute)
+        medal_f1 = medal_f1 if medal_f1 is not None else 0.0
+        ptb_f1 = ptb_f1 if ptb_f1 is not None else 0.0
+        val_score = (medal_f1 + ptb_f1) / 2.0
+        print(f"Checkpoint metric (avg domain F1): {val_score:.4f}")
+
+        scheduler.step(val_score if np.isfinite(val_score) else 0.0)
+
+        # ---- Test ----
+        test_medal = _evaluate_shared_head(
+            model, medal_test, MEDALCARE_REMAP, device, metrics_to_compute,
+            args.label_smoothing, args.threshold,
+        )
+        test_ptb = _evaluate_shared_head(
+            model, ptb_test, PTBXL_REMAP, device, metrics_to_compute,
+            args.label_smoothing, args.threshold,
+        )
+        test_summary_medal = summarise_macro(test_medal, metrics_to_compute) if test_medal else None
+        test_summary_ptb = summarise_macro(test_ptb, metrics_to_compute) if test_ptb else None
+        if test_summary_medal and test_summary_ptb:
+            print(
+                "Test macro -> "
+                f"MedalCare: {macro_summary_str(test_summary_medal)}, "
+                f"PTB-XL: {macro_summary_str(test_summary_ptb)}"
+            )
+
+        # ---- Per-class records ----
+        shared_label_list = list(SHARED_LABELS)
+        record_per_class_metrics(per_class_records, "val_medalcare", val_medal, shared_label_list, epoch)
+        record_per_class_metrics(per_class_records, "val_ptbxl", val_ptb, shared_label_list, epoch)
+        if test_medal:
+            record_per_class_metrics(per_class_records, "test_medalcare", test_medal, shared_label_list, epoch)
+        if test_ptb:
+            record_per_class_metrics(per_class_records, "test_ptbxl", test_ptb, shared_label_list, epoch)
+
+        # ---- Metrics log ----
+        metrics_entry: Dict[str, object] = {
+            "epoch": epoch,
+            "train_loss": {"medalcare": avg_loss_medal, "ptbxl": avg_loss_ptb},
+            "primary_metric": {"name": "avg_domain_f1", "value": val_score},
+            "val": {"medalcare": val_summary_medal, "ptbxl": val_summary_ptb},
+        }
+        if avg_mmd is not None:
+            metrics_entry["train_mmd"] = avg_mmd
+        if test_summary_medal and test_summary_ptb:
+            metrics_entry["test"] = {"medalcare": test_summary_medal, "ptbxl": test_summary_ptb}
+        metrics_log.append(metrics_entry)
+
+        # ---- Checkpoint ----
+        is_best = bool(val_score > best_val_score)
+        if is_best:
+            best_val_score = val_score
+            print("==> New best validation score; saving checkpoint.")
+            checkpoint_state = {
+                "epoch": epoch,
+                "step": epoch,
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "val_score": float(val_score),
+                "val_auroc": float(val_score),
+            }
+            save_checkpoint(checkpoint_state, str(checkpoints_dir))
+            best_filename = args.best_checkpoint_name or "linear_best.pt"
+            torch.save(checkpoint_state, checkpoints_dir / best_filename)
+            best_snapshot = {
+                "epoch": epoch,
+                "primary_metric": {"name": "avg_domain_f1", "value": val_score},
+                "val": {"medalcare": val_summary_medal, "ptbxl": val_summary_ptb},
+                "test": {"medalcare": test_summary_medal, "ptbxl": test_summary_ptb},
+            }
+
+        current_lr = min(group["lr"] for group in optimizer.param_groups)
+        if current_lr < args.early_stop_lr:
+            print(
+                f"LR {current_lr:g} fell below early-stop threshold "
+                f"{args.early_stop_lr:g}; stopping."
+            )
+            break
+
+    # ---- Save reports ----
+    metrics_path = outputs_dir / "metrics.json"
+    save_metrics_report(metrics_path, run_id, metrics_to_compute, metrics_log, best_snapshot)
+    print(f"Saved metrics report to: {metrics_path}")
+
+    per_class_path = outputs_dir / "per_class_metrics.csv"
+    pd.DataFrame(per_class_records).to_csv(per_class_path, index=False)
+    print(f"Saved per-class metrics to: {per_class_path}")
+
+    if args.log_tensors and test_medal and test_ptb:
+        np.savez_compressed(
+            tensors_dir / "test_medalcare.npz",
+            y_true=test_medal["y_true"], y_pred=test_medal["y_pred"],
+        )
+        np.savez_compressed(
+            tensors_dir / "test_ptbxl.npz",
+            y_true=test_ptb["y_true"], y_pred=test_ptb["y_pred"],
+        )
+
+    print("[Exp 7] Shared-head training complete.")
+
+
+# ---------------------------------------------------------------------------
+# Pre-Phase-B (supervisor 2026-04-29): Dual-head joint training on the shared
+# 3-class label space. Reuses build_shared_head_loaders for filtering, but
+# uses two separate per-domain heads sized to N_SHARED via MultiHeadECGFounder.
+# ---------------------------------------------------------------------------
+
+def _evaluate_dual_head_shared(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    task: str,
+    remap_dict: Dict[int, int],
+    device: torch.device,
+    metrics_to_compute: List[str],
+    threshold: float = 0.5,
+) -> Optional[Dict[str, object]]:
+    """Evaluate one head of the dual-head shared-label model on its domain."""
+    if loader.dataset is None or len(loader.dataset) == 0:
+        return None
+    model.eval()
+    preds_list: List[np.ndarray] = []
+    targets_list: List[np.ndarray] = []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc=f"Evaluating ({task})", leave=False):
+            inputs = batch[0].to(device, non_blocking=True)
+            labels_orig = batch[1].to(device, non_blocking=True)
+            labels_shared = remap_labels(labels_orig, remap_dict, N_SHARED, device)
+            logits = model(inputs, task=task)
+            preds_list.append(torch.sigmoid(logits).cpu().numpy())
+            targets_list.append(labels_shared.cpu().numpy())
+    if not preds_list:
+        return None
+    y_pred = np.concatenate(preds_list, axis=0)
+    y_true = np.concatenate(targets_list, axis=0)
+    metrics = compute_multilabel_metrics(y_true, y_pred, metrics_to_compute, threshold=threshold)
+    return {"y_true": y_true, "y_pred": y_pred, "metrics": metrics}
+
+
+def _run_dual_head_shared_labels(args: argparse.Namespace) -> None:
+    """Pre-Phase-B redo: dual-head joint training on the shared 3-class label space.
+
+    Mirrors `_run_shared_head` (same data filtering, alternating-batch loop,
+    optional MMD/ccMMD, checkpoint metric = mean of per-domain F1) but uses
+    a MultiHeadECGFounder with two per-domain heads of width N_SHARED = 3
+    instead of a single shared head. Per-domain pos_weight is computed from
+    the filtered & remapped MedalCare / PTB-XL training labels.
+    """
+    set_deterministic(args.seed)
+    metrics_to_compute = validate_metrics(args.metrics.split(","))
+    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    outputs_dir = (DEFAULT_OUTPUTS / run_id).resolve()
+    checkpoints_dir = outputs_dir / "checkpoints"
+    tensors_dir = outputs_dir / "tensors"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    if args.log_tensors:
+        tensors_dir.mkdir(parents=True, exist_ok=True)
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    mmd_label = "ccMMD" if args.class_cond_mmd else "MMD"
+    if args.lambda_mmd > 0.0:
+        align_msg = f"{mmd_label} (lambda={args.lambda_mmd})"
+    else:
+        align_msg = "no alignment"
+    print(
+        f"[Pre-Phase-B] Dual-head shared-label training "
+        f"({N_SHARED} classes: {SHARED_LABELS}, {align_msg})"
+    )
+
+    # ---- Data: reuse the shared-head loader builder (same filtering) ----
+    loader_bundle = build_shared_head_loaders(args)
+    medal_train = loader_bundle["medal"]["train"]
+    medal_val = loader_bundle["medal"]["val"]
+    medal_test = loader_bundle["medal"]["test"]
+    ptb_train = loader_bundle["ptb"]["train"]
+    ptb_val = loader_bundle["ptb"]["val"]
+    ptb_test = loader_bundle["ptb"]["test"]
+
+    # ---- Per-domain pos_weight from filtered & remapped train labels ----
+    # Re-derive per-domain shared positive counts from the filtered training
+    # datasets to size pos_weight correctly for each head.
+    medal_train_ds = medal_train.dataset
+    ptb_train_ds = ptb_train.dataset
+
+    medal_pos_shared = np.zeros(N_SHARED, dtype=np.float64)
+    medal_n = len(medal_train_ds)
+    medal_df = getattr(medal_train_ds, "labels_df", None)
+    if medal_df is None:
+        raise RuntimeError(
+            "Expected MedalCare training dataset to expose its underlying DataFrame "
+            "as `.labels_df` for pos_weight calculation."
+        )
+    for src_idx, tgt_idx in MEDALCARE_REMAP.items():
+        col = f"label_{src_idx}"
+        if col in medal_df.columns:
+            medal_pos_shared[tgt_idx] += medal_df[col].sum()
+    medal_pos_shared = np.minimum(medal_pos_shared, medal_n)
+    medal_neg_shared = medal_n - medal_pos_shared
+    pos_weight_medal_arr = medal_neg_shared / np.clip(medal_pos_shared, 1e-6, None)
+
+    ptb_pos_shared = np.zeros(N_SHARED, dtype=np.float64)
+    ptb_n = len(ptb_train_ds)
+    for src_idx, tgt_idx in PTBXL_REMAP.items():
+        ptb_pos_shared[tgt_idx] += float(ptb_train_ds.targets[:, src_idx].sum())
+    ptb_pos_shared = np.minimum(ptb_pos_shared, ptb_n)
+    ptb_neg_shared = ptb_n - ptb_pos_shared
+    pos_weight_ptb_arr = ptb_neg_shared / np.clip(ptb_pos_shared, 1e-6, None)
+
+    print(f"[Pre-Phase-B] MedalCare train n={medal_n}, PTB-XL train n={ptb_n}")
+    for i, name in enumerate(SHARED_LABELS):
+        print(
+            f"  {name}: medal pos={medal_pos_shared[i]:.0f} (w={pos_weight_medal_arr[i]:.3f}), "
+            f"ptb pos={ptb_pos_shared[i]:.0f} (w={pos_weight_ptb_arr[i]:.3f})"
+        )
+
+    # ---- Model: dual-head MultiHeadECGFounder, both heads sized to N_SHARED ----
+    model = ft_multihead_ECGFounder(
+        device=device,
+        pth=str(args.checkpoint),
+        n_medal_classes=N_SHARED,
+        n_ptb_classes=N_SHARED,
+        n_theta=0,
+        physics_hidden=args.physics_hidden,
+        physics_dropout=args.physics_dropout,
+        linear_prob=True,
+        use_adapter=True,
+    )
+    head_params = [p for n, p in model.named_parameters() if "head_" in n and p.requires_grad]
+    encoder_params = [
+        p for n, p in model.named_parameters()
+        if "head_" not in n and p.requires_grad
+    ]
+    if not head_params and not encoder_params:
+        raise ValueError("No trainable parameters found.")
+    param_groups = []
+    if head_params:
+        param_groups.append({"params": head_params, "lr": args.lr_head})
+    if encoder_params:
+        param_groups.append({"params": encoder_params, "lr": args.lr_encoder})
+
+    n_head = sum(p.numel() for p in head_params)
+    n_adapter = sum(p.numel() for p in encoder_params)
+    print(
+        f"[Pre-Phase-B] head_medal.out_features={model.head_medal.out_features}, "
+        f"head_ptb.out_features={model.head_ptb.out_features}"
+    )
+    assert model.head_medal.out_features == N_SHARED, "head_medal must be size N_SHARED"
+    assert model.head_ptb.out_features == N_SHARED, "head_ptb must be size N_SHARED"
+    print(
+        f"[Pre-Phase-B] Trainable params: heads={n_head:,}, adapters={n_adapter:,}, "
+        f"total={n_head + n_adapter:,}"
+    )
+
+    # ---- Loss / Optimizer / Scheduler ----
+    pos_weight_medal = torch.tensor(pos_weight_medal_arr, dtype=torch.float32, device=device)
+    pos_weight_ptb = torch.tensor(pos_weight_ptb_arr, dtype=torch.float32, device=device)
+    criterion_medal = nn.BCEWithLogitsLoss(pos_weight=pos_weight_medal)
+    criterion_ptb = nn.BCEWithLogitsLoss(pos_weight=pos_weight_ptb)
+    optimizer = optim.Adam(param_groups, weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, patience=3, factor=0.5, mode="max"
+    )
+
+    # ---- Training loop ----
+    metrics_log: List[Dict[str, object]] = []
+    per_class_records: List[Dict[str, object]] = []
+    best_snapshot: Optional[Dict[str, object]] = None
+    best_val_score = float("-inf")
+
+    for epoch in range(1, args.epochs + 1):
+        print(f"\nEpoch {epoch}/{args.epochs}")
+        model.train()
+        steps = min(len(medal_train), len(ptb_train))
+        running_loss_medal = 0.0
+        running_loss_ptb = 0.0
+        samples_medal = 0
+        samples_ptb = 0
+        running_mmd = 0.0
+        mmd_batches = 0
+
+        for batch_medal, batch_ptb in tqdm(
+            zip(medal_train, ptb_train), total=steps, desc="Training", leave=False
+        ):
+            medal_inputs, medal_labels_8 = batch_medal[0], batch_medal[1]
+            ptb_inputs, ptb_labels_5 = batch_ptb[0], batch_ptb[1]
+
+            medal_inputs = medal_inputs.to(device, non_blocking=True)
+            ptb_inputs = ptb_inputs.to(device, non_blocking=True)
+            medal_labels_8 = medal_labels_8.to(device, non_blocking=True)
+            ptb_labels_5 = ptb_labels_5.to(device, non_blocking=True)
+
+            medal_labels = remap_labels(medal_labels_8, MEDALCARE_REMAP, N_SHARED, device)
+            ptb_labels = remap_labels(ptb_labels_5, PTBXL_REMAP, N_SHARED, device)
+
+            if args.label_smoothing > 0.0:
+                medal_labels_s = medal_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
+                ptb_labels_s = ptb_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
+            else:
+                medal_labels_s = medal_labels
+                ptb_labels_s = ptb_labels
+
+            optimizer.zero_grad()
+
+            logits_medal, feat_medal = model(medal_inputs, task="medalcare", return_features=True)
+            logits_ptb, feat_ptb = model(ptb_inputs, task="ptbxl", return_features=True)
+
+            loss_medal = criterion_medal(logits_medal, medal_labels_s)
+            loss_ptb = criterion_ptb(logits_ptb, ptb_labels_s)
+            loss = loss_medal + loss_ptb
+
+            if args.lambda_mmd > 0.0 and feat_medal.size(0) > 1 and feat_ptb.size(0) > 1:
+                if args.class_cond_mmd:
+                    from losses.mmd import mmd_rbf_class_conditional
+                    mmd_value = mmd_rbf_class_conditional(
+                        feat_medal, feat_ptb, medal_labels, ptb_labels
+                    )
+                else:
+                    mmd_value = mmd_rbf(feat_medal, feat_ptb)
+                loss = loss + args.lambda_mmd * mmd_value
+                running_mmd += mmd_value.item()
+                mmd_batches += 1
+
+            loss.backward()
+            if args.grad_clip and args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            optimizer.step()
+
+            b_m = medal_inputs.size(0)
+            b_p = ptb_inputs.size(0)
+            running_loss_medal += loss_medal.item() * b_m
+            running_loss_ptb += loss_ptb.item() * b_p
+            samples_medal += b_m
+            samples_ptb += b_p
+
+        avg_loss_medal = running_loss_medal / max(samples_medal, 1)
+        avg_loss_ptb = running_loss_ptb / max(samples_ptb, 1)
+        avg_mmd = running_mmd / mmd_batches if mmd_batches > 0 else None
+        print(f"Training loss -> MedalCare: {avg_loss_medal:.6f}, PTB-XL: {avg_loss_ptb:.6f}")
+        if avg_mmd is not None:
+            print(f"Average {mmd_label}: {avg_mmd:.6f}")
+
+        # ---- Validation ----
+        val_medal = _evaluate_dual_head_shared(
+            model, medal_val, "medalcare", MEDALCARE_REMAP, device, metrics_to_compute,
+            args.threshold,
+        )
+        val_ptb = _evaluate_dual_head_shared(
+            model, ptb_val, "ptbxl", PTBXL_REMAP, device, metrics_to_compute,
+            args.threshold,
+        )
+        if val_medal is None or val_ptb is None:
+            raise RuntimeError("Validation split is empty -- cannot continue.")
+
+        val_summary_medal = summarise_macro(val_medal, metrics_to_compute)
+        val_summary_ptb = summarise_macro(val_ptb, metrics_to_compute)
+        print(
+            "Validation macro -> "
+            f"MedalCare: {macro_summary_str(val_summary_medal)}, "
+            f"PTB-XL: {macro_summary_str(val_summary_ptb)}"
+        )
+
+        _, medal_f1 = select_primary_metric(val_medal, metrics_to_compute)
+        _, ptb_f1 = select_primary_metric(val_ptb, metrics_to_compute)
+        medal_f1 = medal_f1 if medal_f1 is not None else 0.0
+        ptb_f1 = ptb_f1 if ptb_f1 is not None else 0.0
+        val_score = (medal_f1 + ptb_f1) / 2.0
+        print(f"Checkpoint metric (avg domain F1): {val_score:.4f}")
+
+        scheduler.step(val_score if np.isfinite(val_score) else 0.0)
+
+        # ---- Test ----
+        test_medal = _evaluate_dual_head_shared(
+            model, medal_test, "medalcare", MEDALCARE_REMAP, device, metrics_to_compute,
+            args.threshold,
+        )
+        test_ptb = _evaluate_dual_head_shared(
+            model, ptb_test, "ptbxl", PTBXL_REMAP, device, metrics_to_compute,
+            args.threshold,
+        )
+        test_summary_medal = summarise_macro(test_medal, metrics_to_compute) if test_medal else None
+        test_summary_ptb = summarise_macro(test_ptb, metrics_to_compute) if test_ptb else None
+        if test_summary_medal and test_summary_ptb:
+            print(
+                "Test macro -> "
+                f"MedalCare: {macro_summary_str(test_summary_medal)}, "
+                f"PTB-XL: {macro_summary_str(test_summary_ptb)}"
+            )
+
+        # ---- Per-class records ----
+        shared_label_list = list(SHARED_LABELS)
+        record_per_class_metrics(per_class_records, "val_medalcare", val_medal, shared_label_list, epoch)
+        record_per_class_metrics(per_class_records, "val_ptbxl", val_ptb, shared_label_list, epoch)
+        if test_medal:
+            record_per_class_metrics(per_class_records, "test_medalcare", test_medal, shared_label_list, epoch)
+        if test_ptb:
+            record_per_class_metrics(per_class_records, "test_ptbxl", test_ptb, shared_label_list, epoch)
+
+        # ---- Metrics log ----
+        metrics_entry: Dict[str, object] = {
+            "epoch": epoch,
+            "train_loss": {"medalcare": avg_loss_medal, "ptbxl": avg_loss_ptb},
+            "primary_metric": {"name": "avg_domain_f1", "value": val_score},
+            "val": {"medalcare": val_summary_medal, "ptbxl": val_summary_ptb},
+        }
+        if avg_mmd is not None:
+            metrics_entry["train_mmd"] = avg_mmd
+        if test_summary_medal and test_summary_ptb:
+            metrics_entry["test"] = {"medalcare": test_summary_medal, "ptbxl": test_summary_ptb}
+        metrics_log.append(metrics_entry)
+
+        # ---- Checkpoint ----
+        is_best = bool(val_score > best_val_score)
+        if is_best:
+            best_val_score = val_score
+            print("==> New best validation score; saving checkpoint.")
+            checkpoint_state = {
+                "epoch": epoch,
+                "step": epoch,
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "val_score": float(val_score),
+                "val_auroc": float(val_score),
+            }
+            save_checkpoint(checkpoint_state, str(checkpoints_dir))
+            best_filename = args.best_checkpoint_name or "linear_best.pt"
+            torch.save(checkpoint_state, checkpoints_dir / best_filename)
+            best_snapshot = {
+                "epoch": epoch,
+                "primary_metric": {"name": "avg_domain_f1", "value": val_score},
+                "val": {"medalcare": val_summary_medal, "ptbxl": val_summary_ptb},
+                "test": {"medalcare": test_summary_medal, "ptbxl": test_summary_ptb},
+            }
+
+        current_lr = min(group["lr"] for group in optimizer.param_groups)
+        if current_lr < args.early_stop_lr:
+            print(
+                f"LR {current_lr:g} fell below early-stop threshold "
+                f"{args.early_stop_lr:g}; stopping."
+            )
+            break
+
+    # ---- Save reports ----
+    metrics_path = outputs_dir / "metrics.json"
+    save_metrics_report(metrics_path, run_id, metrics_to_compute, metrics_log, best_snapshot)
+    print(f"Saved metrics report to: {metrics_path}")
+
+    per_class_path = outputs_dir / "per_class_metrics.csv"
+    pd.DataFrame(per_class_records).to_csv(per_class_path, index=False)
+    print(f"Saved per-class metrics to: {per_class_path}")
+
+    if args.log_tensors and test_medal and test_ptb:
+        np.savez_compressed(
+            tensors_dir / "test_medalcare.npz",
+            y_true=test_medal["y_true"], y_pred=test_medal["y_pred"],
+        )
+        np.savez_compressed(
+            tensors_dir / "test_ptbxl.npz",
+            y_true=test_ptb["y_true"], y_pred=test_ptb["y_pred"],
+        )
+
+    print("[Pre-Phase-B] Dual-head shared-label training complete.")
+
+
 def main() -> None:
     args = parse_args()
     args.freeze_encoder = args.freeze_encoder or getattr(args, "linear_probe", False)
@@ -982,9 +1827,15 @@ def main() -> None:
     metrics_to_compute = validate_metrics(args.metrics.split(","))
     run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if args.dataset == "ptbxl" and not args.freeze_encoder:
-        print("[INFO] Enabling --freeze-encoder for PTB-XL Stage 1 baseline.")
-        args.freeze_encoder = True
+    # --- Exp 7: shared-head branch (completely separate code path) ---
+    if args.shared_head:
+        _run_shared_head(args)
+        return
+
+    # --- Pre-Phase-B redo: dual-head joint training on the shared 3-class space ---
+    if args.dual_head_shared_labels:
+        _run_dual_head_shared_labels(args)
+        return
 
     joint_mode = args.joint_datasets is not None
     if joint_mode and not args.multi_head:
@@ -1075,7 +1926,7 @@ def main() -> None:
             pos_counts = info["pos_counts"]
             neg_counts = info["train_sample_count"] - pos_counts
             dataset_meta = info["dataset_meta"]
-            checkpoint_path = enforce_ptbxl_checkpoint(args.checkpoint)
+            checkpoint_path = args.checkpoint
 
     # Initialize placeholders for optional loaders
     if joint_mode:
@@ -1095,6 +1946,7 @@ def main() -> None:
             physics_hidden=args.physics_hidden,
             physics_dropout=args.physics_dropout,
             linear_prob=args.freeze_encoder,
+            use_adapter=not args.no_adapter,
         )
         if hasattr(model, "feature_dim"):
             print(f"[INFO] Shared encoder feature dim (z): {model.feature_dim}")
@@ -1129,6 +1981,7 @@ def main() -> None:
             pth=str(checkpoint_path),
             n_classes=n_classes,
             linear_prob=False,
+            use_adapter=args.use_adapter,
         )
         in_features = model.dense.in_features
         if args.head_type == "linear":
@@ -1143,9 +1996,12 @@ def main() -> None:
         model.dense = head_module.to(device)
 
         if args.freeze_encoder:
-            for name, param in model.named_parameters():
-                if not name.startswith("dense"):
-                    param.requires_grad = False
+            if args.use_adapter:
+                freeze_backbone_except_adapters(model)
+            else:
+                for name, param in model.named_parameters():
+                    if not name.startswith("dense"):
+                        param.requires_grad = False
 
         head_params = [param for param in model.dense.parameters() if param.requires_grad]
         encoder_params = [
@@ -1333,6 +2189,7 @@ def main() -> None:
                 device,
                 metrics_to_compute,
                 task="medalcare",
+                threshold=args.threshold,
             )
             val_ptb = evaluate_model(
                 model,
@@ -1340,6 +2197,7 @@ def main() -> None:
                 device,
                 metrics_to_compute,
                 task="ptbxl",
+                threshold=args.threshold,
             )
             if val_medal is None or val_ptb is None:
                 raise RuntimeError("Validation split is empty – cannot continue training.")
@@ -1360,6 +2218,7 @@ def main() -> None:
                 device,
                 metrics_to_compute,
                 task=args.dataset if (args.multi_head and not joint_mode) else None,
+                threshold=args.threshold,
             )
             if val_package is None:
                 raise RuntimeError("Validation split is empty – cannot continue training.")
@@ -1371,8 +2230,36 @@ def main() -> None:
         scheduler.step(val_score if np.isfinite(val_score) else 0.0)
 
         if joint_mode:
-            # Test can be added later; focus on val for joint mode
-            test_summary = None
+            medal_test_loader = loaders["medalcare"][2]
+            ptb_test_loader = loaders["ptbxl"][2]
+            test_medal = evaluate_model(
+                model,
+                medal_test_loader,
+                device,
+                metrics_to_compute,
+                task="medalcare",
+                threshold=args.threshold,
+            )
+            test_ptb = evaluate_model(
+                model,
+                ptb_test_loader,
+                device,
+                metrics_to_compute,
+                task="ptbxl",
+                threshold=args.threshold,
+            )
+            if test_medal is not None and test_ptb is not None:
+                test_summary_medal = summarise_macro(test_medal, metrics_to_compute)
+                test_summary_ptb = summarise_macro(test_ptb, metrics_to_compute)
+                print(
+                    "Test macro metrics -> "
+                    f"MedalCare: {macro_summary_str(test_summary_medal)}, "
+                    f"PTB-XL: {macro_summary_str(test_summary_ptb)}"
+                )
+                test_summary = {"medalcare": test_summary_medal, "ptbxl": test_summary_ptb}
+            else:
+                test_summary = None
+                print("Test macro metrics: N/A (empty split)")
             val_package = None  # not used in joint mode
             val_summary = None  # placeholder to avoid undefined use below
         else:
@@ -1382,6 +2269,7 @@ def main() -> None:
                 device,
                 metrics_to_compute,
                 task=args.dataset if (args.multi_head and not joint_mode) else None,
+                threshold=args.threshold,
             )
             if test_package is not None:
                 test_summary = summarise_macro(test_package, metrics_to_compute)
@@ -1398,6 +2286,7 @@ def main() -> None:
                 device,
                 metrics_to_compute,
                 task=args.dataset if (args.multi_head and not joint_mode) else None,
+                threshold=args.threshold,
             )
             if train_package is not None:
                 train_summary = summarise_macro(train_package, metrics_to_compute)
@@ -1417,12 +2306,22 @@ def main() -> None:
         else:
             metrics_entry["val"] = {"macro": val_summary}
         if test_summary is not None:
-            metrics_entry["test"] = {"macro": test_summary}
+            if joint_mode:
+                metrics_entry["test"] = test_summary
+            else:
+                metrics_entry["test"] = {"macro": test_summary}
         if train_package is not None:
             metrics_entry["train"] = {"macro": summarise_macro(train_package, metrics_to_compute)}
         metrics_log.append(metrics_entry)
 
-        if not joint_mode:
+        if joint_mode:
+            record_per_class_metrics(per_class_records, "val_medalcare", val_medal, medal_labels, epoch)
+            record_per_class_metrics(per_class_records, "val_ptbxl", val_ptb, ptb_labels, epoch)
+            if test_medal is not None:
+                record_per_class_metrics(per_class_records, "test_medalcare", test_medal, medal_labels, epoch)
+            if test_ptb is not None:
+                record_per_class_metrics(per_class_records, "test_ptbxl", test_ptb, ptb_labels, epoch)
+        else:
             record_per_class_metrics(per_class_records, "val", val_package, label_columns, epoch)
             if test_package is not None:
                 record_per_class_metrics(per_class_records, "test", test_package, label_columns, epoch)
@@ -1454,7 +2353,7 @@ def main() -> None:
                 "val": {"medalcare": val_summary_medal, "ptbxl": val_summary_ptb}
                 if joint_mode
                 else val_summary,
-                "test": test_summary if not joint_mode else None,
+                "test": test_summary,
             }
 
         current_lr = min(group["lr"] for group in optimizer.param_groups)

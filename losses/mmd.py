@@ -73,3 +73,43 @@ def mmd_rbf(
 
     return sum_xx + sum_yy - 2.0 * sum_xy
 
+
+def mmd_rbf_class_conditional(
+    feat_x: torch.Tensor,
+    feat_y: torch.Tensor,
+    labels_x: torch.Tensor,
+    labels_y: torch.Tensor,
+    sigma: Optional[float] = None,
+    min_samples: int = 2,
+) -> torch.Tensor:
+    """Per-class MMD: compute MMD for each shared class and return the mean.
+
+    For each class c, selects samples positive for c from each domain and
+    computes MMD between those subsets.  Classes with fewer than *min_samples*
+    in either domain are skipped.
+
+    Args:
+        feat_x: Source features (N, D).
+        feat_y: Target features (M, D).
+        labels_x: Source labels (N, C) -- binary, in the shared class space.
+        labels_y: Target labels (M, C) -- binary, in the shared class space.
+        sigma: Optional bandwidth (passed through to mmd_rbf).
+        min_samples: Minimum samples per class per domain to include.
+
+    Returns:
+        Scalar tensor -- mean of per-class MMD values.
+    """
+    n_classes = labels_x.shape[1]
+    mmd_sum = torch.tensor(0.0, device=feat_x.device, dtype=feat_x.dtype)
+    n_valid = 0
+    for c in range(n_classes):
+        mask_x = labels_x[:, c] > 0.5
+        mask_y = labels_y[:, c] > 0.5
+        if mask_x.sum() < min_samples or mask_y.sum() < min_samples:
+            continue
+        mmd_sum = mmd_sum + mmd_rbf(feat_x[mask_x], feat_y[mask_y], sigma)
+        n_valid += 1
+    if n_valid == 0:
+        return torch.tensor(0.0, device=feat_x.device, dtype=feat_x.dtype)
+    return mmd_sum / n_valid
+

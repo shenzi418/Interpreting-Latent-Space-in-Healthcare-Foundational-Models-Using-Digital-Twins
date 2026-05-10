@@ -1,17 +1,41 @@
-# Ignore MedalCare-XL folder
+# --- Large external datasets (do not commit) ---
 MedalCare-XL/
-# Ignore mimic-iv-ecg-demo folder
 mimic-iv-ecg-demo-diagnostic-electrocardiogram-matched-subset-demo-0.1/
-# Ignore PTB-XL dataset folder
 ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/
-__pycache__/
+MedalRaw/
+
+# --- Model checkpoints (large binaries) ---
+checkpoint/
+*.pth
+*.pt
+
+# --- Generated outputs (regenerable from code + data) ---
 outputs/*
 !outputs/quick_waveform_check/
 !outputs/quick_waveform_check/**
-checkpoint/
-MedalRaw/
-*.pth
+
+# --- Local-only working files ---
+reports/
 openspec/
 .cursor/
 AGENTS.md
 env-ECGFounder.yml
+
+# --- Python build/cache ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Editor / IDE / OS clutter ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

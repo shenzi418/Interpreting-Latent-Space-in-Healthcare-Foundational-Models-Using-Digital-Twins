@@ -1,0 +1,35 @@
+{
+  "n_rows": 2198,
+  "n_mi_present": 550,
+  "n_mi_strong": 293,
+  "n_single_territory_primary": 444,
+  "territory_counts_among_mi": {
+    "Inferior": 229,
+    "Anterior": 203,
+    "": 106,
+    "Lateral": 12
+  },
+  "top_subclass_combos": {
+    "IMI": 229,
+    "AMI": 203,
+    "AMI|IMI": 96,
+    "LMI": 12,
+    "AMI|LMI": 7,
+    "PMI": 1,
+    "IMI|PMI": 1,
+    "IMI|LMI": 1
+  },
+  "subclass_to_territory": {
+    "AMI": "Anterior",
+    "IMI": "Inferior",
+    "LMI": "Lateral",
+    "PMI": "Posterior"
+  },
+  "primary_territories": [
+    "Anterior",
+    "Inferior",
+    "Lateral"
+  ],
+  "prob_threshold": 0.0,
+  "strong_threshold": 80.0
+}

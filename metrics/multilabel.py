@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import roc_auc_score
 
-AVAILABLE_METRICS = ("ap", "brier", "roc_auc")
+AVAILABLE_METRICS = ("accuracy", "f1", "recall", "specificity", "precision", "brier", "roc_auc")
+
+_THRESHOLD_METRICS = {"accuracy", "f1", "recall", "specificity", "precision"}
+_PROB_METRICS = {"brier", "roc_auc"}
 
 
 def _validate_inputs(y_true: np.ndarray, y_pred: np.ndarray) -> None:
@@ -19,6 +22,11 @@ def _validate_inputs(y_true: np.ndarray, y_pred: np.ndarray) -> None:
         raise ValueError("Expected 2D arrays for multilabel evaluation.")
 
 
+def _binarise(y_prob: np.ndarray, threshold: float = 0.5) -> np.ndarray:
+    """Convert probabilities to binary predictions at the given threshold."""
+    return (y_prob >= threshold).astype(np.int32)
+
+
 def _macro_average(values: Sequence[Optional[float]]) -> Optional[float]:
     valid = [float(v) for v in values if v is not None]
     if not valid:
@@ -26,16 +34,61 @@ def _macro_average(values: Sequence[Optional[float]]) -> Optional[float]:
     return float(np.mean(valid))
 
 
-def _safe_average_precision(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
-    positives = int(np.sum(y_true == 1))
-    negatives = int(np.sum(y_true == 0))
-    if positives == 0 or negatives == 0:
-        return None
-    try:
-        return float(average_precision_score(y_true, y_score))
-    except ValueError:
-        return None
+# ---------------------------------------------------------------------------
+# Threshold-based metric helpers (operate on binary y_true and y_pred)
+# ---------------------------------------------------------------------------
 
+def _confusion_counts(y_true: np.ndarray, y_pred: np.ndarray):
+    """Return (TP, FP, TN, FN) for a single class (1-D arrays)."""
+    tp = int(np.sum((y_true == 1) & (y_pred == 1)))
+    fp = int(np.sum((y_true == 0) & (y_pred == 1)))
+    tn = int(np.sum((y_true == 0) & (y_pred == 0)))
+    fn = int(np.sum((y_true == 1) & (y_pred == 0)))
+    return tp, fp, tn, fn
+
+
+def _accuracy(y_true: np.ndarray, y_pred_bin: np.ndarray) -> float:
+    tp, fp, tn, fn = _confusion_counts(y_true, y_pred_bin)
+    total = tp + fp + tn + fn
+    if total == 0:
+        return 0.0
+    return float((tp + tn) / total)
+
+
+def _f1(y_true: np.ndarray, y_pred_bin: np.ndarray) -> Optional[float]:
+    tp, fp, tn, fn = _confusion_counts(y_true, y_pred_bin)
+    if tp + fp + fn == 0:
+        return None
+    denom = 2 * tp + fp + fn
+    if denom == 0:
+        return None
+    return float(2 * tp / denom)
+
+
+def _recall(y_true: np.ndarray, y_pred_bin: np.ndarray) -> Optional[float]:
+    tp, fp, tn, fn = _confusion_counts(y_true, y_pred_bin)
+    if tp + fn == 0:
+        return None
+    return float(tp / (tp + fn))
+
+
+def _specificity(y_true: np.ndarray, y_pred_bin: np.ndarray) -> Optional[float]:
+    tp, fp, tn, fn = _confusion_counts(y_true, y_pred_bin)
+    if tn + fp == 0:
+        return None
+    return float(tn / (tn + fp))
+
+
+def _precision(y_true: np.ndarray, y_pred_bin: np.ndarray) -> Optional[float]:
+    tp, fp, tn, fn = _confusion_counts(y_true, y_pred_bin)
+    if tp + fp == 0:
+        return None
+    return float(tp / (tp + fp))
+
+
+# ---------------------------------------------------------------------------
+# Probability-based metric helpers
+# ---------------------------------------------------------------------------
 
 def _brier_score(y_true: np.ndarray, y_score: np.ndarray) -> float:
     return float(np.mean((y_score - y_true) ** 2))
@@ -52,30 +105,55 @@ def _safe_roc_auc(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Per-class dispatch
+# ---------------------------------------------------------------------------
+
+_THRESHOLD_DISPATCH = {
+    "accuracy": _accuracy,
+    "f1": _f1,
+    "recall": _recall,
+    "specificity": _specificity,
+    "precision": _precision,
+}
+
+_PROB_DISPATCH = {
+    "brier": _brier_score,
+    "roc_auc": _safe_roc_auc,
+}
+
+
 def _compute_metric_per_class(
     y_true: np.ndarray,
-    y_pred: np.ndarray,
+    y_pred_prob: np.ndarray,
+    y_pred_bin: np.ndarray,
     metric: str,
 ) -> List[Optional[float]]:
     per_class: List[Optional[float]] = []
-    for class_idx in range(y_true.shape[1]):
-        labels = y_true[:, class_idx]
-        scores = y_pred[:, class_idx]
-        if metric == "ap":
-            per_class.append(_safe_average_precision(labels, scores))
-        elif metric == "brier":
-            per_class.append(_brier_score(labels, scores))
-        elif metric == "roc_auc":
-            per_class.append(_safe_roc_auc(labels, scores))
-        else:
-            raise ValueError(f"Unsupported metric '{metric}'.")
+
+    if metric in _THRESHOLD_DISPATCH:
+        fn = _THRESHOLD_DISPATCH[metric]
+        for c in range(y_true.shape[1]):
+            per_class.append(fn(y_true[:, c], y_pred_bin[:, c]))
+    elif metric in _PROB_DISPATCH:
+        fn = _PROB_DISPATCH[metric]
+        for c in range(y_true.shape[1]):
+            per_class.append(fn(y_true[:, c], y_pred_prob[:, c]))
+    else:
+        raise ValueError(f"Unsupported metric '{metric}'.")
+
     return per_class
 
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def compute_multilabel_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     metric_names: Optional[Iterable[str]] = None,
+    threshold: float = 0.5,
 ) -> Dict[str, Dict[str, List[Optional[float]]]]:
     """Compute per-class and macro metrics for multilabel predictions.
 
@@ -83,6 +161,8 @@ def compute_multilabel_metrics(
         y_true: Ground-truth labels (N, C) with binary entries.
         y_pred: Predicted probabilities (N, C) in [0, 1].
         metric_names: Iterable of metric identifiers to compute.
+        threshold: Decision threshold for converting probabilities to binary
+            predictions (used by threshold-based metrics). Default: 0.5.
 
     Returns:
         Dictionary containing per-class values, macro averages, and support counts.
@@ -97,14 +177,14 @@ def compute_multilabel_metrics(
     y_pred = np.asarray(y_pred)
     _validate_inputs(y_true, y_pred)
 
-    # Ensure probabilities remain in [0, 1]
     y_pred = np.clip(y_pred, 0.0, 1.0)
+    y_pred_bin = _binarise(y_pred, threshold)
 
     per_class_metrics: Dict[str, List[Optional[float]]] = {}
     macro_metrics: Dict[str, Optional[float]] = {}
 
     for metric in metric_names:
-        per_class_values = _compute_metric_per_class(y_true, y_pred, metric)
+        per_class_values = _compute_metric_per_class(y_true, y_pred, y_pred_bin, metric)
         per_class_metrics[metric] = per_class_values
         macro_metrics[metric] = _macro_average(per_class_values)
 
@@ -119,4 +199,3 @@ def compute_multilabel_metrics(
             "negatives": negatives,
         },
     }
-
