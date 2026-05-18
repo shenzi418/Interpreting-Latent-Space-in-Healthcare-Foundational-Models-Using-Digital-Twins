@@ -15,11 +15,16 @@ outputs/*
 !outputs/quick_waveform_check/**
 
 # --- Local-only working files ---
+CLAUDE.local.md
 reports/
-openspec/
 .cursor/
 AGENTS.md
 env-ECGFounder.yml
+
+# openspec/: track the two project-state docs, ignore everything else
+openspec/*
+!openspec/AGENTS.md
+!openspec/project.md
 
 # --- Python build/cache ---
 __pycache__/
