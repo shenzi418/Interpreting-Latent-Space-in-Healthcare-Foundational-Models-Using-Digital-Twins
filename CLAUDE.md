@@ -48,3 +48,25 @@ Python 3.10.19, PyTorch 2.9.1+cu128 (NVIDIA CUDA 12.8), wfdb 4.2.0, neurokit2 0.
 | [`.claude/rules/model-conventions.md`](.claude/rules/model-conventions.md) | Editing `net1d.py`, `finetune_model.py`, or writing a new training entry-point. |
 
 OpenSpec workflow: see [`openspec/AGENTS.md`](openspec/AGENTS.md). **Do not write code during the proposal stage.** Skip proposals for bug fixes, typos, config tweaks, and tests for existing behaviour.
+
+## MCP Tool Usage
+
+Three MCP servers are wired into this project: **context7** (current library/framework docs), **papersflow** (academic literature + citation verification), and **brave-search** (general web).
+
+### When writing the thesis / paper
+- Before citing any paper: `papersflow.verify_citation` to normalize the reference. Do NOT cite from training-data memory — DOIs and venue attributions drift (e.g., Li et al. was previously miscited as "MICCAI 2024" when the correct venue is IEEE TMI 2024).
+- Searching literature on a topic: `papersflow.search_literature`, then `find_related_papers` to expand. Do NOT use brave-search or built-in WebSearch for academic queries.
+- Mapping prior work around a known paper (references + citing papers): `papersflow.get_citation_graph` / `expand_citation_graph`.
+
+### When coding
+- API, version, or migration questions on `torch`, `scikit-learn`, `neurokit2`, `wfdb`, etc.: `context7.resolve-library-id` → `context7.query-docs`. Use even for libraries you "know" — training data may be stale. Do NOT use WebSearch — it returns out-of-date tutorial blogs.
+- Debugging *project* business logic, refactoring, or anything in this repo's source: use `Read` / `Grep` / `Glob`. Context7 is for upstream library docs, not local code.
+
+### When researching outside academia
+- Vendor blogs, product pages, news, current events: `brave-search.brave_web_search`.
+- Location / business queries: `brave-search.brave_local_search`.
+- Do NOT use brave-search for: library docs (→ context7), academic citations (→ papersflow).
+
+### Anti-patterns
+- Never fabricate a citation, DOI, or venue — verify via `papersflow.verify_citation` first.
+- Never trust your memory of a library API for code that will actually run — query `context7` and quote the result.
