@@ -20,6 +20,7 @@ reports/
 .cursor/
 AGENTS.md
 env-ECGFounder.yml
+.claude/settings.local.json
 
 # openspec/: track the two project-state docs, ignore everything else
 openspec/*

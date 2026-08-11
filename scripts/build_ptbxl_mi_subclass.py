@@ -60,7 +60,7 @@ DEFAULT_PTBXL_ROOT = (
 DEFAULT_OUTPUT = REPO_ROOT / "data" / "ptbxl_mi_subclass.csv"
 DEFAULT_AUDIT_LATENTS = REPO_ROOT / "outputs" / "latents" / "exp7_ptbxl" / "latents.npz"
 
-# Anatomical mapping: subclass -> territory.
+# Anatomical mapping: subclass -> territory (legacy 3-class scheme).
 SUBCLASS_TO_TERRITORY: Dict[str, str] = {
     "AMI": "Anterior",
     "IMI": "Inferior",
@@ -68,6 +68,100 @@ SUBCLASS_TO_TERRITORY: Dict[str, str] = {
     "PMI": "Posterior",
 }
 PRIMARY_TERRITORIES = ("Anterior", "Inferior", "Lateral")  # MedalCare-aligned
+
+# ---------------------------------------------------------------------------
+# 4-class refined anatomical scheme (added 2026-05-13 for Track 3 B2-CD redux).
+#
+# Maps the 14 raw PTB-XL MI scp_codes into four anatomical compartments that
+# match the MedalCare-XL folder structure (LAD_*, LCX_*_ant, LCX_*_post, RCA_*).
+# This finally uses the ASMI/ALMI/ILMI/IPLMI distinctions that the legacy
+# 3-class scheme was collapsing.
+#
+# Compartment groups (by raw SCP code):
+#   ANTERIOR_PURE  : AMI, ASMI, INJAS              -> pure LAD territory
+#   ANTEROLATERAL  : ALMI, INJAL                   -> LCX anterior-lateral
+#   INFERIOR_PURE  : IMI, INJIN                    -> pure RCA territory
+#   INFEROLATERAL  : ILMI, INJIL, IPLMI            -> LCX posterior / RCA distal
+#   LATERAL_PURE   : LMI, INJLA                    -> wall identifier (sub-modifies the above)
+#   EXCL_POSTERIOR : PMI, IPMI                     -> pure posterior, no MedalCare equivalent
+#
+# Decision rules (in order):
+#   1.  has_excl_posterior                                -> ""           (excluded)
+#   2.  any anterior compartment AND any inferior compartment  -> ""      (multi-territory, excluded)
+#   3.  anterior side:
+#         has_anterolateral OR has_lateral_pure            -> Anterolateral
+#         else                                             -> Anteroseptal
+#   4.  inferior side:
+#         has_inferolateral OR has_lateral_pure            -> Inferolateral
+#         else                                             -> Inferior
+#   5.  pure lateral only (no anterior, no inferior)       -> ""           (ambiguous)
+#
+# 2-class backup: Anteroseptal + Anterolateral -> "Anterior"; Inferior + Inferolateral -> "Inferior".
+# ---------------------------------------------------------------------------
+ANTERIOR_PURE_CODES: Tuple[str, ...] = ("AMI", "ASMI", "INJAS")
+ANTEROLATERAL_CODES: Tuple[str, ...] = ("ALMI", "INJAL")
+INFERIOR_PURE_CODES: Tuple[str, ...] = ("IMI", "INJIN")
+INFEROLATERAL_CODES: Tuple[str, ...] = ("ILMI", "INJIL", "IPLMI")
+LATERAL_PURE_CODES: Tuple[str, ...] = ("LMI", "INJLA")
+EXCLUDED_POSTERIOR_CODES: Tuple[str, ...] = ("PMI", "IPMI")  # no MedalCare equivalent
+
+TERRITORIES_4C: Tuple[str, ...] = (
+    "Anteroseptal",
+    "Anterolateral",
+    "Inferior",
+    "Inferolateral",
+)
+TERRITORIES_2C: Tuple[str, ...] = ("Anterior", "Inferior")
+
+TERRITORY_4C_TO_2C: Dict[str, str] = {
+    "Anteroseptal": "Anterior",
+    "Anterolateral": "Anterior",
+    "Inferior": "Inferior",
+    "Inferolateral": "Inferior",
+}
+
+
+def derive_territory_4c(raw_codes_str: str) -> str:
+    """Map a "|"-joined raw mi_codes string to a 4-class anatomical territory.
+
+    Returns the bucket name from TERRITORIES_4C, or "" when the row is
+    excluded (multi-territory, pure-posterior, or ambiguous pure-lateral).
+    """
+    if not raw_codes_str:
+        return ""
+    codes = set(raw_codes_str.split("|"))
+
+    has_anterior_pure = bool(codes & set(ANTERIOR_PURE_CODES))
+    has_anterolateral = bool(codes & set(ANTEROLATERAL_CODES))
+    has_inferior_pure = bool(codes & set(INFERIOR_PURE_CODES))
+    has_inferolateral = bool(codes & set(INFEROLATERAL_CODES))
+    has_lateral_pure = bool(codes & set(LATERAL_PURE_CODES))
+    has_excl_posterior = bool(codes & set(EXCLUDED_POSTERIOR_CODES))
+
+    if has_excl_posterior:
+        return ""
+
+    is_anterior = has_anterior_pure or has_anterolateral
+    is_inferior = has_inferior_pure or has_inferolateral
+    if is_anterior and is_inferior:
+        return ""  # multi-territory
+
+    if is_anterior:
+        if has_anterolateral or has_lateral_pure:
+            return "Anterolateral"
+        return "Anteroseptal"
+    if is_inferior:
+        if has_inferolateral or has_lateral_pure:
+            return "Inferolateral"
+        return "Inferior"
+
+    # only lateral, or no MI compartment hit
+    return ""
+
+
+def derive_territory_2c(territory_4c: str) -> str:
+    """Collapse the 4-class scheme to a 2-class Anterior-vs-Inferior backup."""
+    return TERRITORY_4C_TO_2C.get(territory_4c, "")
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +229,16 @@ def derive_row_labels(
     mi_present = int(len(mi_codes_present) > 0)
     best_prob = max((p for _, p, _ in mi_codes_present), default=0.0)
     mi_strong = int(mi_present and best_prob >= strong_threshold)
+    raw_codes_joined = "|".join(mi_codes)
+    territory_4c = derive_territory_4c(raw_codes_joined)
+    territory_2c = derive_territory_2c(territory_4c)
     return {
-        "mi_codes": "|".join(mi_codes),
+        "mi_codes": raw_codes_joined,
         "mi_subclasses": "|".join(subclasses),
         "territory_set": "|".join(territory_set),
         "territory": territory,
+        "territory_4c": territory_4c,
+        "territory_2c": territory_2c,
         "mi_present": mi_present,
         "mi_strong": mi_strong,
         "best_mi_prob": float(best_prob),
@@ -233,15 +332,27 @@ def main() -> None:
         .to_dict()
     )
     n_clean_primary = int(out_df["territory"].isin(PRIMARY_TERRITORIES).sum())
+    n_clean_4c = int(out_df["territory_4c"].isin(TERRITORIES_4C).sum())
+    n_clean_2c = int(out_df["territory_2c"].isin(TERRITORIES_2C).sum())
+    counts_4c = {t: int((out_df["territory_4c"] == t).sum()) for t in TERRITORIES_4C}
+    counts_2c = {t: int((out_df["territory_2c"] == t).sum()) for t in TERRITORIES_2C}
     print("\n=== Summary (test fold) ===")
     print(f"  rows                : {n_total}")
     print(f"  mi_present          : {n_mi}  ({100*n_mi/n_total:.1f}%)")
     print(f"  mi_strong (>= {args.strong_threshold}) : {n_mi_strong}  ({100*n_mi_strong/n_total:.1f}%)")
-    print(f"  single-territory MI : {n_clean_primary}  (Anterior/Inferior/Lateral)")
-    print(f"  territory breakdown (single-territory only):")
+    print(f"  single-territory MI (legacy 3-class): {n_clean_primary}  (Anterior/Inferior/Lateral)")
+    print(f"  primary 4-class total              : {n_clean_4c}")
+    print(f"  primary 2-class total              : {n_clean_2c}")
+    print(f"  territory breakdown (legacy 3-class):")
     for t in PRIMARY_TERRITORIES:
         n_t = int((out_df["territory"] == t).sum())
-        print(f"    {t:9s}: {n_t}")
+        print(f"    {t:13s}: {n_t}")
+    print(f"  territory_4c breakdown (refined 4-class):")
+    for t in TERRITORIES_4C:
+        print(f"    {t:13s}: {counts_4c[t]}")
+    print(f"  territory_2c breakdown (Anterior-vs-Inferior backup):")
+    for t in TERRITORIES_2C:
+        print(f"    {t:13s}: {counts_2c[t]}")
     print(f"  Top 10 subclass combinations among MI rows:")
     for k, v in list(subclass_counts.items())[:10]:
         print(f"    {k!r:>30s} : {v}")
@@ -251,10 +362,24 @@ def main() -> None:
         "n_mi_present": n_mi,
         "n_mi_strong": n_mi_strong,
         "n_single_territory_primary": n_clean_primary,
+        "n_primary_4c": n_clean_4c,
+        "n_primary_2c": n_clean_2c,
         "territory_counts_among_mi": territory_counts,
+        "territory_4c_counts": counts_4c,
+        "territory_2c_counts": counts_2c,
         "top_subclass_combos": subclass_counts,
         "subclass_to_territory": SUBCLASS_TO_TERRITORY,
         "primary_territories": list(PRIMARY_TERRITORIES),
+        "territories_4c": list(TERRITORIES_4C),
+        "territories_2c": list(TERRITORIES_2C),
+        "code_groups_4c": {
+            "ANTERIOR_PURE_CODES": list(ANTERIOR_PURE_CODES),
+            "ANTEROLATERAL_CODES": list(ANTEROLATERAL_CODES),
+            "INFERIOR_PURE_CODES": list(INFERIOR_PURE_CODES),
+            "INFEROLATERAL_CODES": list(INFEROLATERAL_CODES),
+            "LATERAL_PURE_CODES": list(LATERAL_PURE_CODES),
+            "EXCLUDED_POSTERIOR_CODES": list(EXCLUDED_POSTERIOR_CODES),
+        },
         "prob_threshold": args.prob_threshold,
         "strong_threshold": args.strong_threshold,
     }

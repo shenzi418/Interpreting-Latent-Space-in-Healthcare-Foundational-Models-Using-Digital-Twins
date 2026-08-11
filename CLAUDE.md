@@ -55,7 +55,7 @@ Three MCP servers are wired into this project: **context7** (current library/fra
 
 ### When writing the thesis / paper
 - Before citing any paper: `papersflow.verify_citation` to normalize the reference. Do NOT cite from training-data memory — DOIs and venue attributions drift (e.g., Li et al. was previously miscited as "MICCAI 2024" when the correct venue is IEEE TMI 2024).
-- Searching literature on a topic: `papersflow.search_literature`, then `find_related_papers` to expand. Do NOT use brave-search or built-in WebSearch for academic queries.
+- Searching literature on a topic: use `papersflow.search_literature` (peer-reviewed academic record) AND `brave-search.brave_web_search` (adjacent non-peer-reviewed material — preprints not yet indexed, code releases, researcher blogs, workshop pages, GitHub repos, social-media discussion of papers) in tandem. The two are complementary. Then expand the academic cluster via `papersflow.find_related_papers` and `papersflow.get_citation_graph`.
 - Mapping prior work around a known paper (references + citing papers): `papersflow.get_citation_graph` / `expand_citation_graph`.
 
 ### When coding
@@ -65,7 +65,7 @@ Three MCP servers are wired into this project: **context7** (current library/fra
 ### When researching outside academia
 - Vendor blogs, product pages, news, current events: `brave-search.brave_web_search`.
 - Location / business queries: `brave-search.brave_local_search`.
-- Do NOT use brave-search for: library docs (→ context7), academic citations (→ papersflow).
+- Do NOT use brave-search for: library docs (→ context7), citation verification (→ `papersflow.verify_citation`). For literature *discovery*, brave-search is a legitimate complement to papersflow.
 
 ### Anti-patterns
 - Never fabricate a citation, DOI, or venue — verify via `papersflow.verify_citation` first.

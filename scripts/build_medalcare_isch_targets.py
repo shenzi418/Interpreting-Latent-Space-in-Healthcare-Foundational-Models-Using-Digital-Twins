@@ -59,6 +59,61 @@ DEFAULT_AUDIT_LATENTS = {
 ISCH_KEYS = ("isch[0].phi", "isch[0].z", "isch[0].size", "isch[0].rho_eps_max")
 MI_LABEL_COL_INDEX = 1  # native MedalCare 8-class column for MI
 
+# ---------------------------------------------------------------------------
+# 4-class / 8-class anatomical-territory mapping (added 2026-05-13 for
+# Track 3 B2-CD redux). The 4-class scheme matches the refined PTB-XL classes
+# in scripts/build_ptbxl_mi_subclass.py; the 8-class scheme is the full
+# folder-level granularity for the in-domain audit.
+# ---------------------------------------------------------------------------
+TERRITORIES_4C: Tuple[str, ...] = (
+    "Anteroseptal",     # MedalCare LAD_* -- PTB-XL ASMI/AMI/INJAS only
+    "Anterolateral",    # MedalCare LCX_*_ant -- PTB-XL ALMI/INJAL or AMI+LMI
+    "Inferior",         # MedalCare RCA_* -- PTB-XL IMI/INJIN only
+    "Inferolateral",    # MedalCare LCX_*_post -- PTB-XL ILMI/INJIL/IPLMI
+)
+TERRITORIES_8C: Tuple[str, ...] = (
+    "LAD_0.3",
+    "LAD_1.0",
+    "LCX_0.3_ant",
+    "LCX_0.3_post",
+    "LCX_1.0_ant",
+    "LCX_1.0_post",
+    "RCA_0.3",
+    "RCA_1.0",
+)
+
+
+def derive_territory_4c(coronary: str, lcx_subtype: str) -> str:
+    """Map (coronary, lcx_subtype) -> 4-class anatomical territory.
+
+    Returns one of TERRITORIES_4C, or "" if the input is unrecognised.
+    """
+    if coronary == "LAD":
+        return "Anteroseptal"
+    if coronary == "RCA":
+        return "Inferior"
+    if coronary == "LCX":
+        if lcx_subtype == "ant":
+            return "Anterolateral"
+        if lcx_subtype == "post":
+            return "Inferolateral"
+    return ""
+
+
+def derive_territory_8c(coronary: str, lcx_subtype: str, transmural: float) -> str:
+    """Map (coronary, lcx_subtype, transmural) -> 8-class folder name."""
+    if transmural < 0.5:
+        trans = "0.3"
+    else:
+        trans = "1.0"
+    if coronary == "LCX":
+        if lcx_subtype not in ("ant", "post"):
+            return ""
+        return f"LCX_{trans}_{lcx_subtype}"
+    if coronary in ("LAD", "RCA"):
+        return f"{coronary}_{trans}"
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Parsing utilities
@@ -249,6 +304,13 @@ def build_split(
         for entry in transmural_mismatch[:3]:
             print(f"    -> {entry}")
 
+    territory_4c = [
+        derive_territory_4c(c, s) for c, s in zip(coronary, lcx_subtype)
+    ]
+    territory_8c = [
+        derive_territory_8c(c, s, t)
+        for c, s, t in zip(coronary, lcx_subtype, transmural)
+    ]
     target = {
         "idx_in_split": np.asarray(idx_in_split, dtype=np.int64),
         "phi": np.asarray(phi, dtype=np.float64),
@@ -259,6 +321,8 @@ def build_split(
         "lcx_subtype": np.asarray(lcx_subtype, dtype=object),
         "transmural": np.asarray(transmural, dtype=np.float64),
         "run_id": np.asarray(run_id, dtype=object),
+        "territory_4c": np.asarray(territory_4c, dtype=object),
+        "territory_8c": np.asarray(territory_8c, dtype=object),
     }
 
     # Optional alignment audit against an existing latent file.
@@ -333,6 +397,17 @@ def summarise(target: Dict[str, np.ndarray], split_name: str) -> Dict[str, objec
                 "mean_circular": float(np.arctan2(np.sin(sub).mean(), np.cos(sub).mean())),
             }
     summary["per_coronary_phi"] = per_cor_phi
+
+    territory_4c_arr = target["territory_4c"]
+    territory_8c_arr = target["territory_8c"]
+    counts_4c = {t: int((territory_4c_arr == t).sum()) for t in TERRITORIES_4C}
+    counts_8c = {t: int((territory_8c_arr == t).sum()) for t in TERRITORIES_8C}
+    summary["territory_4c_counts"] = counts_4c
+    summary["territory_8c_counts"] = counts_8c
+    print(
+        f"  [SUMMARY {split_name}] territory_4c={counts_4c}\n"
+        f"     territory_8c={counts_8c}"
+    )
     return summary
 
 

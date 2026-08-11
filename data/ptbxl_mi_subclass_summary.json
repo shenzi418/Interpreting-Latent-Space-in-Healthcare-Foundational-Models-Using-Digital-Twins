@@ -3,11 +3,23 @@
   "n_mi_present": 550,
   "n_mi_strong": 293,
   "n_single_territory_primary": 444,
+  "n_primary_4c": 438,
+  "n_primary_2c": 438,
   "territory_counts_among_mi": {
     "Inferior": 229,
     "Anterior": 203,
     "": 106,
     "Lateral": 12
+  },
+  "territory_4c_counts": {
+    "Anteroseptal": 168,
+    "Anterolateral": 42,
+    "Inferior": 196,
+    "Inferolateral": 32
+  },
+  "territory_2c_counts": {
+    "Anterior": 210,
+    "Inferior": 228
   },
   "top_subclass_combos": {
     "IMI": 229,
@@ -30,6 +42,44 @@
     "Inferior",
     "Lateral"
   ],
+  "territories_4c": [
+    "Anteroseptal",
+    "Anterolateral",
+    "Inferior",
+    "Inferolateral"
+  ],
+  "territories_2c": [
+    "Anterior",
+    "Inferior"
+  ],
+  "code_groups_4c": {
+    "ANTERIOR_PURE_CODES": [
+      "AMI",
+      "ASMI",
+      "INJAS"
+    ],
+    "ANTEROLATERAL_CODES": [
+      "ALMI",
+      "INJAL"
+    ],
+    "INFERIOR_PURE_CODES": [
+      "IMI",
+      "INJIN"
+    ],
+    "INFEROLATERAL_CODES": [
+      "ILMI",
+      "INJIL",
+      "IPLMI"
+    ],
+    "LATERAL_PURE_CODES": [
+      "LMI",
+      "INJLA"
+    ],
+    "EXCLUDED_POSTERIOR_CODES": [
+      "PMI",
+      "IPMI"
+    ]
+  },
   "prob_threshold": 0.0,
   "strong_threshold": 80.0
 }

@@ -45,6 +45,22 @@
         "max": -0.0009402118726875575,
         "mean_circular": -1.0001742035294934
       }
+    },
+    "territory_4c_counts": {
+      "Anteroseptal": 1799,
+      "Anterolateral": 850,
+      "Inferior": 1798,
+      "Inferolateral": 900
+    },
+    "territory_8c_counts": {
+      "LAD_0.3": 899,
+      "LAD_1.0": 900,
+      "LCX_0.3_ant": 450,
+      "LCX_0.3_post": 450,
+      "LCX_1.0_ant": 400,
+      "LCX_1.0_post": 450,
+      "RCA_0.3": 898,
+      "RCA_1.0": 900
     }
   },
   {
@@ -93,6 +109,22 @@
         "max": -0.0018624126975848032,
         "mean_circular": -0.999870058509557
       }
+    },
+    "territory_4c_counts": {
+      "Anteroseptal": 400,
+      "Anterolateral": 250,
+      "Inferior": 400,
+      "Inferolateral": 200
+    },
+    "territory_8c_counts": {
+      "LAD_0.3": 200,
+      "LAD_1.0": 200,
+      "LCX_0.3_ant": 150,
+      "LCX_0.3_post": 100,
+      "LCX_1.0_ant": 100,
+      "LCX_1.0_post": 100,
+      "RCA_0.3": 200,
+      "RCA_1.0": 200
     }
   },
   {
@@ -141,6 +173,22 @@
         "max": -0.002306321321323024,
         "mean_circular": -1.0000089530047307
       }
+    },
+    "territory_4c_counts": {
+      "Anteroseptal": 400,
+      "Anterolateral": 200,
+      "Inferior": 400,
+      "Inferolateral": 200
+    },
+    "territory_8c_counts": {
+      "LAD_0.3": 200,
+      "LAD_1.0": 200,
+      "LCX_0.3_ant": 100,
+      "LCX_0.3_post": 100,
+      "LCX_1.0_ant": 100,
+      "LCX_1.0_post": 100,
+      "RCA_0.3": 200,
+      "RCA_1.0": 200
     }
   }
 ]

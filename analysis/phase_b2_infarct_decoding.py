@@ -47,6 +47,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from sklearn.linear_model import RidgeCV, LogisticRegression  # noqa: E402
+from sklearn.tree import DecisionTreeClassifier  # noqa: E402
+from sklearn.neighbors import KNeighborsClassifier  # noqa: E402
 from sklearn.preprocessing import StandardScaler  # noqa: E402
 from sklearn.metrics import (  # noqa: E402
     r2_score,
@@ -55,7 +57,9 @@ from sklearn.metrics import (  # noqa: E402
     f1_score,
     precision_recall_fscore_support,
     confusion_matrix,
+    balanced_accuracy_score,
 )
+from sklearn.model_selection import StratifiedKFold  # noqa: E402
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -96,6 +100,55 @@ FEAT_PTBXL_PATH = REPO_ROOT / "data" / "ecg_features_ptbxl_test.npz"
 # Boundary at ±2.0 cleanly partitions LAD vs LCX vs RCA in MedalCare TRAIN.
 PHI_BIN_BOUNDARY = 2.0
 TERRITORY_LABELS = ["Anterior", "Inferior", "Lateral"]
+
+# ---------------------------------------------------------------------------
+# Pipeline A — Direct coronary-territory classifier (added 2026-05-13).
+#
+# Trained on Z_MedalCare_train_MI -> territory_4c with class_weight='balanced'
+# and 5-fold internal CV over C. Evaluated in-domain on MedalCare_test_MI and
+# cross-domain on PTB-XL primary 4c subset (n=438). Macro-F1 and balanced
+# accuracy with 1000-resample percentile bootstrap CIs and label-shuffle
+# permutation p-values. Pipeline B (calibrated phi-bins) lives in §3.3.
+# ---------------------------------------------------------------------------
+TERRITORIES_4C = ["Anteroseptal", "Anterolateral", "Inferior", "Inferolateral"]
+TERRITORIES_2C = ["Anterior", "Inferior"]
+TERRITORY_4C_TO_2C: Dict[str, str] = {
+    "Anteroseptal": "Anterior",
+    "Anterolateral": "Anterior",
+    "Inferior": "Inferior",
+    "Inferolateral": "Inferior",
+}
+
+# Wider C-grid for the 4-class territory probe (1024-d Z favors stronger L2 than
+# the binary rho_eps_max probe; smoke run hit the smallest C in LOGREG_CS).
+LOGREG_CS_TERR_4C = np.logspace(-5, 2, 8)  # [1e-5, 1e-4, ..., 1e1, 1e2]
+
+# ---------------------------------------------------------------------------
+# Section 3.4 / 8-class in-domain audit (MedalCare only).
+# Full MedalCare folder taxonomy: 4 anatomies x 2 transmuralities.
+TERRITORIES_8C = [
+    "LAD_0.3", "LAD_1.0",
+    "LCX_0.3_ant", "LCX_0.3_post",
+    "LCX_1.0_ant", "LCX_1.0_post",
+    "RCA_0.3", "RCA_1.0",
+]
+# Collapse 8c -> 4c anatomy (drops transmurality).
+TERRITORY_8C_TO_4C: Dict[str, str] = {
+    "LAD_0.3":      "Anteroseptal",  "LAD_1.0":      "Anteroseptal",
+    "LCX_0.3_ant":  "Anterolateral", "LCX_1.0_ant":  "Anterolateral",
+    "LCX_0.3_post": "Inferolateral", "LCX_1.0_post": "Inferolateral",
+    "RCA_0.3":      "Inferior",      "RCA_1.0":      "Inferior",
+}
+# Collapse 8c -> 2c transmurality (drops anatomy).
+TRANSMURALITY_LABELS = ["0.3", "1.0"]
+TERRITORY_8C_TO_TRANS: Dict[str, str] = {
+    "LAD_0.3":      "0.3", "LAD_1.0":      "1.0",
+    "LCX_0.3_ant":  "0.3", "LCX_1.0_ant":  "1.0",
+    "LCX_0.3_post": "0.3", "LCX_1.0_post": "1.0",
+    "RCA_0.3":      "0.3", "RCA_1.0":      "1.0",
+}
+# Same C-grid as the 4c probe -- 1024-d Z still favors heavy L2 for 8c.
+LOGREG_CS_TERR_8C = LOGREG_CS_TERR_4C
 
 OUT_DIR = REPO_ROOT / "outputs" / "phase_b2"
 OUT_JSON = OUT_DIR / "in_domain.json"
@@ -368,7 +421,6 @@ def fit_logistic_binary(
         raise RuntimeError("Test labels are single-class for rho_eps_max; cannot compute AUC.")
 
     # Manual CV to pick C (LogisticRegressionCV is finicky with `cv` + class_weight; do this explicitly).
-    from sklearn.model_selection import StratifiedKFold
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
     cv_scores = {}
     for C in LOGREG_CS:
@@ -691,6 +743,543 @@ def cross_domain_phi_eval(
     }
 
 
+# ---------------------------------------------------------------------------
+# Section 3.2 / Pipeline A: direct coronary-territory classifier (4-class)
+# ---------------------------------------------------------------------------
+
+def fit_territory_4c_classifier(
+    X_train_std: np.ndarray,
+    y_train_4c: np.ndarray,
+    Cs: np.ndarray = LOGREG_CS_TERR_4C,
+    max_iter: int = 4000,
+    seed: int = SEED,
+) -> Tuple[LogisticRegression, float, Dict[str, float]]:
+    """Fit multinomial LogReg on standardized X_train with internal 5-fold CV
+    over Cs, then refit on the full training set at the best C.
+
+    Returns
+    -------
+    model       : the refit LogisticRegression fitted on all of X_train_std.
+    best_C      : the C value that maximized 5-fold CV macro-F1.
+    cv_scores   : {str(C): mean_cv_macro_f1} for every C tried.
+    """
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+    cv_scores: Dict[str, float] = {}
+    for C in Cs:
+        fold_scores: List[float] = []
+        for tr_idx, va_idx in skf.split(X_train_std, y_train_4c):
+            est = LogisticRegression(
+                C=C,
+                penalty="l2",
+                solver="lbfgs",
+                class_weight="balanced",
+                max_iter=max_iter,
+                multi_class="multinomial",
+            )
+            est.fit(X_train_std[tr_idx], y_train_4c[tr_idx])
+            y_va_pred = est.predict(X_train_std[va_idx])
+            fold_scores.append(
+                f1_score(
+                    y_train_4c[va_idx],
+                    y_va_pred,
+                    labels=TERRITORIES_4C,
+                    average="macro",
+                    zero_division=0,
+                )
+            )
+        cv_scores[str(C)] = float(np.mean(fold_scores))
+
+    best_C = float(max(cv_scores, key=cv_scores.get))
+    model = LogisticRegression(
+        C=best_C,
+        penalty="l2",
+        solver="lbfgs",
+        class_weight="balanced",
+        max_iter=max_iter,
+        multi_class="multinomial",
+    )
+    model.fit(X_train_std, y_train_4c)
+    return model, best_C, cv_scores
+
+
+def _score_predictions(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    rng: np.random.Generator,
+    labels: List[str],
+    n_boot: int = N_BOOT,
+    n_perm: int = N_PERM_BINARY,
+    collapse_map: Optional[Dict[str, str]] = None,
+    collapse_labels: Optional[List[str]] = None,
+) -> Dict[str, object]:
+    """Score multi-class predictions with macro-F1 + balanced accuracy.
+
+    Returns 1000-bootstrap percentile CIs + 200-shuffle label-permutation p
+    values for both metrics, per-class P/R/F1/support, and confusion matrix.
+
+    When ``collapse_map`` is provided, both truth and predictions are remapped
+    via that dict and scored on ``collapse_labels``; rows whose mapped value
+    is "" are dropped (the underlying classifier is NOT refit).
+    """
+    if collapse_map is not None:
+        assert collapse_labels is not None, "collapse_labels required with collapse_map"
+        y_true_eval = np.array([collapse_map.get(t, "") for t in y_true], dtype=object)
+        y_pred_eval = np.array([collapse_map.get(t, "") for t in y_pred], dtype=object)
+        keep = (y_true_eval != "") & (y_pred_eval != "")
+        y_true_eval = y_true_eval[keep]
+        y_pred_eval = y_pred_eval[keep]
+        eval_labels = collapse_labels
+    else:
+        y_true_eval = np.asarray(y_true, dtype=object)
+        y_pred_eval = np.asarray(y_pred, dtype=object)
+        eval_labels = labels
+
+    n = y_true_eval.size
+    macro_f1 = float(
+        f1_score(y_true_eval, y_pred_eval, labels=eval_labels, average="macro", zero_division=0)
+    )
+    bal_acc = float(balanced_accuracy_score(y_true_eval, y_pred_eval))
+    p, r, f1, support = precision_recall_fscore_support(
+        y_true_eval, y_pred_eval, labels=eval_labels, zero_division=0
+    )
+    cm = confusion_matrix(y_true_eval, y_pred_eval, labels=eval_labels)
+    per_class = {
+        eval_labels[i]: {
+            "precision": float(p[i]),
+            "recall": float(r[i]),
+            "f1": float(f1[i]),
+            "support": int(support[i]),
+        }
+        for i in range(len(eval_labels))
+    }
+
+    boot_f1 = np.empty(n_boot)
+    boot_bal = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = rng.integers(0, n, n)
+        boot_f1[b] = f1_score(
+            y_true_eval[idx], y_pred_eval[idx],
+            labels=eval_labels, average="macro", zero_division=0,
+        )
+        boot_bal[b] = balanced_accuracy_score(y_true_eval[idx], y_pred_eval[idx])
+
+    perm_f1 = np.empty(n_perm)
+    perm_bal = np.empty(n_perm)
+    for q in range(n_perm):
+        y_perm = y_true_eval.copy()
+        rng.shuffle(y_perm)
+        perm_f1[q] = f1_score(
+            y_perm, y_pred_eval, labels=eval_labels, average="macro", zero_division=0
+        )
+        perm_bal[q] = balanced_accuracy_score(y_perm, y_pred_eval)
+    p_perm_f1 = float((np.sum(perm_f1 >= macro_f1) + 1) / (n_perm + 1))
+    p_perm_bal = float((np.sum(perm_bal >= bal_acc) + 1) / (n_perm + 1))
+
+    return {
+        "n_total": int(n),
+        "n_per_class_truth": {t: int((y_true_eval == t).sum()) for t in eval_labels},
+        "n_per_class_pred":  {t: int((y_pred_eval == t).sum()) for t in eval_labels},
+        "labels": list(eval_labels),
+        "macro_f1": macro_f1,
+        "macro_f1_ci95": [
+            float(np.percentile(boot_f1, 2.5)),
+            float(np.percentile(boot_f1, 97.5)),
+        ],
+        "permutation_p_macro_f1": p_perm_f1,
+        "balanced_accuracy": bal_acc,
+        "balanced_accuracy_ci95": [
+            float(np.percentile(boot_bal, 2.5)),
+            float(np.percentile(boot_bal, 97.5)),
+        ],
+        "permutation_p_balanced_accuracy": p_perm_bal,
+        "per_class": per_class,
+        "confusion_matrix": cm.tolist(),
+        "_y_pred": y_pred_eval,
+        "_y_true": y_true_eval,
+    }
+
+
+def _score_4c_predictions(
+    y_true_4c: np.ndarray,
+    y_pred_4c: np.ndarray,
+    rng: np.random.Generator,
+    n_boot: int = N_BOOT,
+    n_perm: int = N_PERM_BINARY,
+    labels: List[str] = TERRITORIES_4C,
+    collapse_4c_to_2c: bool = False,
+) -> Dict[str, object]:
+    """Backward-compat wrapper around ``_score_predictions`` used by Pipelines
+    A and B. Hardcodes the 4c -> 2c collapse using ``TERRITORY_4C_TO_2C``.
+    """
+    return _score_predictions(
+        y_true=y_true_4c, y_pred=y_pred_4c, rng=rng,
+        labels=labels, n_boot=n_boot, n_perm=n_perm,
+        collapse_map=(TERRITORY_4C_TO_2C if collapse_4c_to_2c else None),
+        collapse_labels=(TERRITORIES_2C if collapse_4c_to_2c else None),
+    )
+
+
+def evaluate_territory_classifier(
+    model: LogisticRegression,
+    X_eval_std: np.ndarray,
+    y_eval: np.ndarray,
+    labels: List[str],
+    rng: np.random.Generator,
+    n_boot: int = N_BOOT,
+    n_perm: int = N_PERM_BINARY,
+    collapse_4c_to_2c: bool = False,
+) -> Dict[str, object]:
+    """Apply a fitted multinomial LogReg to standardized X_eval and score it.
+
+    Thin wrapper around ``_score_4c_predictions``: predicts with the model
+    then scores. ``collapse_4c_to_2c`` triggers a 4c -> 2c truth+pred remap
+    before scoring (model is NOT refit).
+    """
+    y_pred = model.predict(X_eval_std)
+    return _score_4c_predictions(
+        y_true_4c=y_eval, y_pred_4c=y_pred,
+        rng=rng, n_boot=n_boot, n_perm=n_perm,
+        labels=labels, collapse_4c_to_2c=collapse_4c_to_2c,
+    )
+
+
+def pipeline_a_for_source(
+    src_name: str,
+    X_train_std: np.ndarray,
+    X_test_std: np.ndarray,
+    X_ptbxl_std: np.ndarray,
+    y_train_4c: np.ndarray,
+    y_test_4c: np.ndarray,
+    y_ptbxl_4c: np.ndarray,
+    rng: np.random.Generator,
+    n_boot: int,
+    n_perm: int,
+) -> Dict[str, object]:
+    """Run one full Pipeline A leg for a single source (Z or ecg_features).
+
+    Trains a 4-class multinomial LogReg on (X_train_std, y_train_4c) and
+    evaluates it on (X_test_std, y_test_4c) [in-domain] and on
+    (X_ptbxl_std, y_ptbxl_4c) [cross-domain]. Both 4-class and 2-class
+    (collapsed) metrics are reported for the cross-domain leg.
+    """
+    print(f"      [pipeline-A / {src_name}] fitting 4-class LogReg on n_train={X_train_std.shape[0]}")
+    model, best_C, cv_scores = fit_territory_4c_classifier(X_train_std, y_train_4c)
+    print(
+        f"      [pipeline-A / {src_name}] best_C={best_C:g}; cv_macro_f1={cv_scores[str(best_C)]:.3f}"
+    )
+
+    in_domain = evaluate_territory_classifier(
+        model, X_test_std, y_test_4c, TERRITORIES_4C,
+        rng=rng, n_boot=n_boot, n_perm=n_perm, collapse_4c_to_2c=False,
+    )
+    cross_4c = evaluate_territory_classifier(
+        model, X_ptbxl_std, y_ptbxl_4c, TERRITORIES_4C,
+        rng=rng, n_boot=n_boot, n_perm=n_perm, collapse_4c_to_2c=False,
+    )
+    cross_2c = evaluate_territory_classifier(
+        model, X_ptbxl_std, y_ptbxl_4c, TERRITORIES_4C,
+        rng=rng, n_boot=n_boot, n_perm=n_perm, collapse_4c_to_2c=True,
+    )
+    return {
+        "best_C": float(best_C),
+        "cv_scores_per_C": cv_scores,
+        "in_domain_4c": in_domain,
+        "cross_domain_4c": cross_4c,
+        "cross_domain_2c": cross_2c,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Section 3.3 / Pipeline B: calibrated phi-bins -> 4-class territory
+# ---------------------------------------------------------------------------
+
+# Hardcoded baseline boundaries for the 4-class phi-bin variant (mirrors the
+# existing PHI_BIN_BOUNDARY but expanded to 4 wedges):
+#   LAD            phi in (0, +2]      -> Anteroseptal
+#   LCX_*_ant      phi in (+2, +pi]    -> Anterolateral
+#   LCX_*_post     phi in [-pi, -2)    -> Inferolateral
+#   RCA            phi in (-2, 0]      -> Inferior
+# These are pre-registered from the MedalCare audit (theta_mi_build_summary.json).
+PHI_4C_INNER_BOUNDARY = 0.0   # LAD <-> RCA split
+PHI_4C_OUTER_BOUNDARY = 2.0   # LCX wedge boundary on both sides
+
+
+def hardcoded_phi_to_4c(phi: np.ndarray) -> np.ndarray:
+    """Map predicted phi in [-pi, +pi] to territory_4c via fixed wedges.
+
+    Returns an object array shape (n,) with values in TERRITORIES_4C.
+    """
+    phi = np.arctan2(np.sin(phi), np.cos(phi))  # ensure wrap to [-pi, +pi]
+    out = np.empty(phi.shape, dtype=object)
+    out[(phi > 2.0)] = "Anterolateral"
+    out[(phi >= 0.0) & (phi <= 2.0)] = "Anteroseptal"
+    out[(phi >= -2.0) & (phi < 0.0)] = "Inferior"
+    out[(phi < -2.0)] = "Inferolateral"
+    return out
+
+
+def fit_phi_to_4c_calibrator(
+    phi_pred_train: np.ndarray,
+    y_train_4c: np.ndarray,
+    seed: int = SEED,
+) -> Tuple[object, str, Dict[str, float]]:
+    """Fit a calibrator from (sin(phi_pred), cos(phi_pred)) -> territory_4c.
+
+    Candidates: DecisionTree depth=4, multinomial LogReg (L2, C=1.0), kNN(k=10,
+    distance-weighted). All use class_weight='balanced' where applicable. Picks
+    the candidate with the highest 5-fold StratifiedKFold internal CV macro-F1
+    and refits on the full (phi_pred_train, y_train_4c) pool.
+
+    Returns (fitted_estimator, name, cv_scores_per_name).
+    """
+    X = np.stack([np.sin(phi_pred_train), np.cos(phi_pred_train)], axis=1)
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+    candidates: Dict[str, object] = {
+        "tree_d4": DecisionTreeClassifier(
+            max_depth=4, class_weight="balanced", random_state=seed,
+        ),
+        "logreg_l2": LogisticRegression(
+            C=1.0, penalty="l2", solver="lbfgs",
+            multi_class="multinomial", class_weight="balanced", max_iter=2000,
+        ),
+        "knn_10": KNeighborsClassifier(n_neighbors=10, weights="distance"),
+    }
+    cv_scores: Dict[str, float] = {}
+    for name, est_template in candidates.items():
+        fold_f1: List[float] = []
+        for tr_idx, va_idx in skf.split(X, y_train_4c):
+            est = type(est_template)(**est_template.get_params())
+            est.fit(X[tr_idx], y_train_4c[tr_idx])
+            y_pred = est.predict(X[va_idx])
+            fold_f1.append(
+                f1_score(
+                    y_train_4c[va_idx], y_pred,
+                    labels=TERRITORIES_4C, average="macro", zero_division=0,
+                )
+            )
+        cv_scores[name] = float(np.mean(fold_f1))
+
+    best_name = max(cv_scores, key=cv_scores.get)
+    best_est = candidates[best_name]
+    best_est.fit(X, y_train_4c)
+    return best_est, best_name, cv_scores
+
+
+def _predict_phi_to_4c(calibrator: object, phi_pred: np.ndarray) -> np.ndarray:
+    """Apply a fitted phi-to-4c calibrator to a 1-d phi array."""
+    X = np.stack([np.sin(phi_pred), np.cos(phi_pred)], axis=1)
+    return calibrator.predict(X)
+
+
+def pipeline_b_for_source(
+    src_name: str,
+    phi_pred_test: np.ndarray,    # MedalCare TEST phi predictions, n=1200
+    y_test_4c: np.ndarray,        # MedalCare TEST territory_4c, n=1200
+    phi_pred_ptbxl: np.ndarray,   # PTB-XL primary 4c phi predictions, n=438
+    y_ptbxl_4c: np.ndarray,       # PTB-XL primary 4c truth, n=438
+    rng: np.random.Generator,
+    n_boot: int,
+    n_perm: int,
+) -> Dict[str, object]:
+    """Run one full Pipeline B leg for a single source (Z or ecg_features).
+
+    The phi regressor is NOT refit -- ``phi_pred_test`` and ``phi_pred_ptbxl``
+    are assumed pre-computed by the upstream phi-Ridge in this config. The
+    calibrator is fit on (sin/cos of phi_pred_test) -> y_test_4c and then
+    applied to phi_pred_ptbxl. The hardcoded wedge baseline is also scored for
+    delta comparison.
+    """
+    print(f"      [pipeline-B / {src_name}] fitting phi->4c calibrator on n_train={phi_pred_test.size}")
+    calibrator, cal_name, cv_scores = fit_phi_to_4c_calibrator(phi_pred_test, y_test_4c)
+    print(
+        f"      [pipeline-B / {src_name}] best calibrator = {cal_name}; "
+        f"cv_macro_f1 = {cv_scores[cal_name]:.3f}  (others: "
+        + ", ".join(f"{k}={v:.3f}" for k, v in cv_scores.items() if k != cal_name)
+        + ")"
+    )
+
+    # Predicted territories from the calibrator (in-domain + cross-domain).
+    y_pred_test_cal = _predict_phi_to_4c(calibrator, phi_pred_test)
+    y_pred_ptbxl_cal = _predict_phi_to_4c(calibrator, phi_pred_ptbxl)
+    # Predicted territories from the hardcoded wedges (cross-domain only -- the
+    # in-domain hardcoded score is a sanity benchmark we also report).
+    y_pred_test_hard = hardcoded_phi_to_4c(phi_pred_test)
+    y_pred_ptbxl_hard = hardcoded_phi_to_4c(phi_pred_ptbxl)
+
+    in_domain_cal = _score_4c_predictions(
+        y_test_4c, y_pred_test_cal, rng=rng, n_boot=n_boot, n_perm=n_perm,
+    )
+    in_domain_hard = _score_4c_predictions(
+        y_test_4c, y_pred_test_hard, rng=rng, n_boot=n_boot, n_perm=n_perm,
+    )
+    cross_cal_4c = _score_4c_predictions(
+        y_ptbxl_4c, y_pred_ptbxl_cal, rng=rng, n_boot=n_boot, n_perm=n_perm,
+    )
+    cross_cal_2c = _score_4c_predictions(
+        y_ptbxl_4c, y_pred_ptbxl_cal, rng=rng, n_boot=n_boot, n_perm=n_perm,
+        collapse_4c_to_2c=True,
+    )
+    cross_hard_4c = _score_4c_predictions(
+        y_ptbxl_4c, y_pred_ptbxl_hard, rng=rng, n_boot=n_boot, n_perm=n_perm,
+    )
+    cross_hard_2c = _score_4c_predictions(
+        y_ptbxl_4c, y_pred_ptbxl_hard, rng=rng, n_boot=n_boot, n_perm=n_perm,
+        collapse_4c_to_2c=True,
+    )
+
+    return {
+        "calibrator_name": cal_name,
+        "calibrator_cv_scores": cv_scores,
+        "phi_4c_outer_boundary_rad": PHI_4C_OUTER_BOUNDARY,
+        "phi_4c_inner_boundary_rad": PHI_4C_INNER_BOUNDARY,
+        "in_domain_calibrator_4c": in_domain_cal,
+        "in_domain_hardcoded_4c": in_domain_hard,
+        "cross_calibrator_4c": cross_cal_4c,
+        "cross_calibrator_2c": cross_cal_2c,
+        "cross_hardcoded_4c": cross_hard_4c,
+        "cross_hardcoded_2c": cross_hard_2c,
+        # Internal arrays for downstream plotting / diagnostics:
+        "_phi_pred_ptbxl": phi_pred_ptbxl,
+        "_y_pred_ptbxl_cal": y_pred_ptbxl_cal,
+        "_y_pred_ptbxl_hard": y_pred_ptbxl_hard,
+    }
+
+
+def plot_phi_pred_by_territory_4c(
+    phi_pred: np.ndarray,
+    territory_truth_4c: np.ndarray,
+    title: str,
+    save_path: Path,
+    bins: int = 36,
+) -> None:
+    """4-panel overlaid histogram of phi_pred conditioned on territory_4c truth.
+
+    Vertical guides mark the hardcoded wedge boundaries (phi = 0, +/- 2 rad)
+    and the +/- pi wrap. Each panel shows the empirical distribution of phi_pred
+    for one true territory, with class size in the legend label.
+    """
+    colors = {
+        "Anteroseptal":   "#d62728",
+        "Anterolateral":  "#ff7f0e",
+        "Inferior":       "#1f77b4",
+        "Inferolateral":  "#2ca02c",
+    }
+    fig, ax = plt.subplots(figsize=(8.0, 4.5))
+    phi_pred = np.arctan2(np.sin(phi_pred), np.cos(phi_pred))
+    edges = np.linspace(-np.pi, np.pi, bins + 1)
+    for t in TERRITORIES_4C:
+        mask = territory_truth_4c == t
+        if mask.sum() == 0:
+            continue
+        ax.hist(
+            phi_pred[mask], bins=edges, alpha=0.55,
+            color=colors[t], edgecolor="black", linewidth=0.4,
+            label=f"{t} (n={int(mask.sum())})",
+        )
+    for x, lbl in [(-2.0, "-2 rad"), (0.0, "0"), (2.0, "+2 rad")]:
+        ax.axvline(x, color="grey", linestyle="--", linewidth=0.8)
+        ax.text(x, ax.get_ylim()[1] * 0.95, lbl, rotation=90, fontsize=7,
+                color="grey", va="top", ha="right")
+    ax.set_xlim(-np.pi, np.pi)
+    ax.set_xlabel("predicted phi (radians)")
+    ax.set_ylabel("count")
+    ax.set_title(title, fontsize=10)
+    ax.legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=140)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Section 3.4 / In-domain 8-class audit (MedalCare only).
+#
+# Trains a multinomial LogReg on Z_MedalCare_train -> territory_8c and scores
+# it on MedalCare_test under three lenses: full 8c, 4c anatomy collapse, 2c
+# transmurality collapse. This is purely in-domain -- no cross-domain transfer.
+# Used to support the publishable claim that fine-tuned Z encodes the 8-class
+# anatomy x transmurality structure that lives in the MedalCare folder names.
+# ---------------------------------------------------------------------------
+
+def fit_territory_8c_classifier(
+    X_train_std: np.ndarray,
+    y_train_8c: np.ndarray,
+    Cs: np.ndarray = LOGREG_CS_TERR_8C,
+    max_iter: int = 4000,
+    seed: int = SEED,
+) -> Tuple[LogisticRegression, float, Dict[str, float]]:
+    """Same recipe as ``fit_territory_4c_classifier`` but for 8c labels."""
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+    cv_scores: Dict[str, float] = {}
+    for C in Cs:
+        fold_scores: List[float] = []
+        for tr_idx, va_idx in skf.split(X_train_std, y_train_8c):
+            est = LogisticRegression(
+                C=C, penalty="l2", solver="lbfgs",
+                class_weight="balanced", max_iter=max_iter,
+                multi_class="multinomial",
+            )
+            est.fit(X_train_std[tr_idx], y_train_8c[tr_idx])
+            y_va_pred = est.predict(X_train_std[va_idx])
+            fold_scores.append(
+                f1_score(
+                    y_train_8c[va_idx], y_va_pred,
+                    labels=TERRITORIES_8C, average="macro", zero_division=0,
+                )
+            )
+        cv_scores[str(C)] = float(np.mean(fold_scores))
+
+    best_C = float(max(cv_scores, key=cv_scores.get))
+    model = LogisticRegression(
+        C=best_C, penalty="l2", solver="lbfgs",
+        class_weight="balanced", max_iter=max_iter,
+        multi_class="multinomial",
+    )
+    model.fit(X_train_std, y_train_8c)
+    return model, best_C, cv_scores
+
+
+def in_domain_8c_for_source(
+    src_name: str,
+    X_train_std: np.ndarray,
+    X_test_std: np.ndarray,
+    y_train_8c: np.ndarray,
+    y_test_8c: np.ndarray,
+    rng: np.random.Generator,
+    n_boot: int,
+    n_perm: int,
+) -> Dict[str, object]:
+    """Fit 8c classifier on (X_train, y_train_8c) and score on test under
+    three collapses: 8c (full), 4c (anatomy only), 2c-transmurality.
+    """
+    print(f"      [8c-audit / {src_name}] fitting 8-class LogReg on n_train={X_train_std.shape[0]}")
+    model, best_C, cv_scores = fit_territory_8c_classifier(X_train_std, y_train_8c)
+    print(
+        f"      [8c-audit / {src_name}] best_C={best_C:g}; cv_macro_f1={cv_scores[str(best_C)]:.3f}"
+    )
+    y_pred_8c = model.predict(X_test_std)
+    full_8c = _score_predictions(
+        y_test_8c, y_pred_8c, rng=rng, labels=TERRITORIES_8C,
+        n_boot=n_boot, n_perm=n_perm,
+    )
+    anat_4c = _score_predictions(
+        y_test_8c, y_pred_8c, rng=rng, labels=TERRITORIES_8C,
+        n_boot=n_boot, n_perm=n_perm,
+        collapse_map=TERRITORY_8C_TO_4C, collapse_labels=TERRITORIES_4C,
+    )
+    trans_2c = _score_predictions(
+        y_test_8c, y_pred_8c, rng=rng, labels=TERRITORIES_8C,
+        n_boot=n_boot, n_perm=n_perm,
+        collapse_map=TERRITORY_8C_TO_TRANS, collapse_labels=TRANSMURALITY_LABELS,
+    )
+    return {
+        "best_C": float(best_C),
+        "cv_scores_per_C": cv_scores,
+        "in_domain_8c": full_8c,
+        "in_domain_4c_anatomy": anat_4c,
+        "in_domain_2c_transmurality": trans_2c,
+    }
+
+
 def confusion_matrix_plot(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -756,6 +1345,18 @@ def main() -> None:
              "and plots are routed to outputs/phase_b2{suffix}/ to avoid "
              "overwriting the original-latent results.",
     )
+    parser.add_argument(
+        "--no-pipeline-a", action="store_true",
+        help="Skip the 4-class direct-territory classifier (Pipeline A).",
+    )
+    parser.add_argument(
+        "--no-pipeline-b", action="store_true",
+        help="Skip the calibrated phi->4c pipeline (Pipeline B).",
+    )
+    parser.add_argument(
+        "--no-pipeline-8c", action="store_true",
+        help="Skip the in-domain 8-class audit (Section 3.4).",
+    )
     args = parser.parse_args()
 
     # Resolve output directory based on --latent-suffix. When the user passes
@@ -766,11 +1367,13 @@ def main() -> None:
     if suffix and not explicit_out:
         out_dir = REPO_ROOT / "outputs" / f"phase_b2{suffix}"
         args.out = out_dir / "in_domain.json"
-        out_cd_path = out_dir / "cross_domain.json"
     else:
         out_dir = args.out.parent
-        out_cd_path = OUT_CD_JSON if not suffix else out_dir / "cross_domain.json"
+    out_cd_path = out_dir / "cross_domain.json"
+    out_a_path = out_dir / "cross_domain_4c_pipelineA.json"
 
+    out_b_path = out_dir / "cross_domain_4c_pipelineB.json"
+    out_8c_path = out_dir / "in_domain_8c.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
@@ -793,6 +1396,52 @@ def main() -> None:
     size_test = targets["test"]["size"]
     rho_test = targets["test"]["rho_eps_max"]
     transmurality_test = targets["test"]["transmural"]
+
+    # Pipeline-A / Pipeline-B 4-class territory labels (added 2026-05-13).
+    do_pipeline_a = not args.no_pipeline_a
+    do_pipeline_b_local = not args.no_pipeline_b
+    do_pipeline_8c_local = not args.no_pipeline_8c
+    need_4c = do_pipeline_a or do_pipeline_b_local
+    if need_4c:
+        territory_4c_train = targets["train"].get("territory_4c")
+        territory_4c_test = targets["test"].get("territory_4c")
+        if territory_4c_train is None or territory_4c_test is None:
+            raise RuntimeError(
+                "theta_mi_*.npz missing 'territory_4c' key -- rebuild via "
+                "scripts/build_medalcare_isch_targets.py before running Pipeline A."
+            )
+        # Convert object arrays to plain numpy str arrays for stable use downstream.
+        territory_4c_train = np.array(territory_4c_train.tolist(), dtype=object)
+        territory_4c_test = np.array(territory_4c_test.tolist(), dtype=object)
+        print(
+            f"[pipeline-A] MedalCare territory_4c train counts: "
+            f"{dict((t, int((territory_4c_train == t).sum())) for t in TERRITORIES_4C)}"
+        )
+        print(
+            f"[pipeline-A] MedalCare territory_4c test counts: "
+            f"{dict((t, int((territory_4c_test == t).sum())) for t in TERRITORIES_4C)}"
+        )
+
+    # 8-class in-domain audit territory labels (Section 3.4, added 2026-05-14).
+    if do_pipeline_8c_local:
+        territory_8c_train = targets["train"].get("territory_8c")
+        territory_8c_test = targets["test"].get("territory_8c")
+        if territory_8c_train is None or territory_8c_test is None:
+            raise RuntimeError(
+                "theta_mi_*.npz missing 'territory_8c' key -- rebuild via "
+                "scripts/build_medalcare_isch_targets.py before running the "
+                "8-class audit."
+            )
+        territory_8c_train = np.array(territory_8c_train.tolist(), dtype=object)
+        territory_8c_test = np.array(territory_8c_test.tolist(), dtype=object)
+        print(
+            f"[8c-audit] MedalCare territory_8c train counts: "
+            f"{dict((t, int((territory_8c_train == t).sum())) for t in TERRITORIES_8C)}"
+        )
+        print(
+            f"[8c-audit] MedalCare territory_8c test counts: "
+            f"{dict((t, int((territory_8c_test == t).sum())) for t in TERRITORIES_8C)}"
+        )
 
     # Build the MI-only ECG-feature arrays once (impute later w/ train medians).
     F_train_mi = feat_train_full[idx_train].astype(np.float64)
@@ -818,7 +1467,7 @@ def main() -> None:
 
     # Cross-domain: load PTB-XL ground truth + features once.
     do_cd = not args.no_cross_domain
-    if do_cd:
+    if do_cd or need_4c:
         print("\n[cross-domain] loading PTB-XL ground-truth subclass CSV + features...")
         ptbxl_subclass_df = load_ptbxl_subclass_csv()
         # Build the single-territory primary subset (Anterior / Inferior / Lateral only).
@@ -827,7 +1476,7 @@ def main() -> None:
         primary_idx = primary_df["row_idx"].to_numpy()  # row index into the FULL PTB-XL test fold
         primary_truth = primary_df["territory"].to_numpy()
         print(
-            f"[cross-domain] primary subset n={primary_idx.size}; per-territory: "
+            f"[cross-domain] primary (3c) subset n={primary_idx.size}; per-territory: "
             f"{dict(primary_df['territory'].value_counts())}"
         )
 
@@ -840,8 +1489,31 @@ def main() -> None:
             nan_mask = np.isnan(feat_ptbxl_primary[:, j])
             feat_ptbxl_primary[nan_mask, j] = feat_medians[j]
 
+    if need_4c:
+        # Pipeline-A / Pipeline-B primary 4-class subset (n=438 in fold10).
+        primary_4c_mask = ptbxl_subclass_df["territory_4c"].isin(TERRITORIES_4C)
+        primary_4c_df = ptbxl_subclass_df[primary_4c_mask].copy()
+        primary_4c_idx = primary_4c_df["row_idx"].to_numpy()
+        primary_4c_truth = primary_4c_df["territory_4c"].to_numpy()
+        primary_4c_truth_2c = primary_4c_df["territory_2c"].to_numpy()
+        per_class_4c = dict(primary_4c_df["territory_4c"].value_counts())
+        per_class_2c = dict(primary_4c_df["territory_2c"].value_counts())
+        print(
+            f"[pipeline-A] PTB-XL 4c primary subset n={primary_4c_idx.size}; "
+            f"per-territory_4c: {per_class_4c}; per-territory_2c: {per_class_2c}"
+        )
+        feat_ptbxl_primary_4c = feat_ptbxl_full[primary_4c_idx].astype(np.float64)
+        for j in range(feat_ptbxl_primary_4c.shape[1]):
+            nan_mask = np.isnan(feat_ptbxl_primary_4c[:, j])
+            feat_ptbxl_primary_4c[nan_mask, j] = feat_medians[j]
+
     results: Dict[str, Dict[str, Dict[str, object]]] = {}
     cd_results: Dict[str, Dict[str, object]] = {}
+    pipeline_a_results: Dict[str, Dict[str, object]] = {}
+    pipeline_b_results: Dict[str, Dict[str, object]] = {}
+    audit_8c_results: Dict[str, Dict[str, object]] = {}
+    do_pipeline_b = do_pipeline_b_local
+    do_pipeline_8c = do_pipeline_8c_local
 
     for cfg in configs:
         print(f"\n{'='*60}\n[CONFIG] {cfg}{(' [' + suffix + ']') if suffix else ''}\n{'='*60}")
@@ -974,6 +1646,221 @@ def main() -> None:
                 f"vs features={cd_f['sensitivity_2class_AntInf']['macro_f1']:.3f}"
             )
 
+        # ---- Section 8: Pipeline A — direct 4-class territory classifier ----
+        if do_pipeline_a:
+            print(f"  [{cfg}] PIPELINE A (direct 4c territory classifier)")
+            # Reuse Z_ptbxl_full from CD block if it was already loaded; else load it now.
+            if do_cd:
+                Z_ptbxl_full_a = Z_ptbxl_full  # noqa: F821 -- defined inside the CD block above
+            else:
+                Z_ptbxl_full_a = load_ptbxl_latents(cfg, suffix=suffix)
+            Z_ptbxl_primary_4c = Z_ptbxl_full_a[primary_4c_idx].astype(np.float64)
+            Z_ptbxl_primary_4c_std = z_scaler.transform(Z_ptbxl_primary_4c)
+            feat_ptbxl_primary_4c_std = feat_scaler.transform(feat_ptbxl_primary_4c)
+
+            pa_z = pipeline_a_for_source(
+                src_name=f"{cfg}/Z",
+                X_train_std=Z_train_std,
+                X_test_std=Z_test_std,
+                X_ptbxl_std=Z_ptbxl_primary_4c_std,
+                y_train_4c=territory_4c_train,
+                y_test_4c=territory_4c_test,
+                y_ptbxl_4c=primary_4c_truth,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            pa_f = pipeline_a_for_source(
+                src_name=f"{cfg}/ecg_features",
+                X_train_std=F_train_std,
+                X_test_std=F_test_std,
+                X_ptbxl_std=feat_ptbxl_primary_4c_std,
+                y_train_4c=territory_4c_train,
+                y_test_4c=territory_4c_test,
+                y_ptbxl_4c=primary_4c_truth,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            pipeline_a_results[cfg] = {"Z": pa_z, "ecg_features": pa_f}
+
+            # Confusion-matrix plot (4c, Z only).
+            cm_a_path = out_dir / f"cm_A_4c_{cfg}.png"
+            confusion_matrix_plot(
+                pa_z["cross_domain_4c"]["_y_true"],
+                pa_z["cross_domain_4c"]["_y_pred"],
+                TERRITORIES_4C,
+                title=(
+                    f"Pipeline A 4c — PTB-XL territory CM (Z), config={cfg}\n"
+                    f"macro-F1 = {pa_z['cross_domain_4c']['macro_f1']:.3f} "
+                    f"[{pa_z['cross_domain_4c']['macro_f1_ci95'][0]:.3f}, "
+                    f"{pa_z['cross_domain_4c']['macro_f1_ci95'][1]:.3f}]  "
+                    f"p_perm = {pa_z['cross_domain_4c']['permutation_p_macro_f1']:.4f}"
+                ),
+                save_path=cm_a_path,
+            )
+            # 2c collapse CM for the same model.
+            cm_a_2c_path = out_dir / f"cm_A_2c_{cfg}.png"
+            confusion_matrix_plot(
+                pa_z["cross_domain_2c"]["_y_true"],
+                pa_z["cross_domain_2c"]["_y_pred"],
+                TERRITORIES_2C,
+                title=(
+                    f"Pipeline A 2c (Ant-vs-Inf collapse) — PTB-XL CM (Z), config={cfg}\n"
+                    f"macro-F1 = {pa_z['cross_domain_2c']['macro_f1']:.3f}  "
+                    f"p_perm = {pa_z['cross_domain_2c']['permutation_p_macro_f1']:.4f}"
+                ),
+                save_path=cm_a_2c_path,
+            )
+            print(f"    saved {cm_a_path} and {cm_a_2c_path}")
+            print(
+                f"    in-domain 4c macro-F1: "
+                f"Z={pa_z['in_domain_4c']['macro_f1']:.3f} "
+                f"vs NK2={pa_f['in_domain_4c']['macro_f1']:.3f}  | "
+                f"cross-domain 4c macro-F1: "
+                f"Z={pa_z['cross_domain_4c']['macro_f1']:.3f} "
+                f"vs NK2={pa_f['cross_domain_4c']['macro_f1']:.3f}  | "
+                f"cross-domain 2c macro-F1: "
+                f"Z={pa_z['cross_domain_2c']['macro_f1']:.3f} "
+                f"vs NK2={pa_f['cross_domain_2c']['macro_f1']:.3f}"
+            )
+
+        # ---- Section 9: Pipeline B -- calibrated phi-bins -> 4-class ----
+        if do_pipeline_b:
+            print(f"  [{cfg}] PIPELINE B (calibrated phi-bins -> territory_4c)")
+            # Phi predictions on MedalCare TEST already cached in cfg_result.
+            phi_pred_test_z = cfg_result["Z"]["phi"]["_phi_pred"]
+            phi_pred_test_f = cfg_result["ecg_features"]["phi"]["_phi_pred"]
+
+            # Phi predictions on PTB-XL primary 4c subset -- predict fresh
+            # using the cached phi-Ridge model + the already-standardised inputs.
+            if not do_pipeline_a:
+                # If Pipeline A was disabled, Z_ptbxl_full / *_std are not yet
+                # built; load + standardise now so Pipeline B is independent.
+                Z_ptbxl_full_b = load_ptbxl_latents(cfg, suffix=suffix)
+                Z_ptbxl_primary_4c = Z_ptbxl_full_b[primary_4c_idx].astype(np.float64)
+                Z_ptbxl_primary_4c_std = z_scaler.transform(Z_ptbxl_primary_4c)
+                feat_ptbxl_primary_4c_std = feat_scaler.transform(feat_ptbxl_primary_4c)
+
+            phi_model_z = cfg_result["Z"]["phi"]["_model"]
+            phi_model_f = cfg_result["ecg_features"]["phi"]["_model"]
+            Y_z_ptbxl = phi_model_z.predict(Z_ptbxl_primary_4c_std)
+            phi_pred_ptbxl_z = np.arctan2(Y_z_ptbxl[:, 0], Y_z_ptbxl[:, 1])
+            Y_f_ptbxl = phi_model_f.predict(feat_ptbxl_primary_4c_std)
+            phi_pred_ptbxl_f = np.arctan2(Y_f_ptbxl[:, 0], Y_f_ptbxl[:, 1])
+
+            pb_z = pipeline_b_for_source(
+                src_name=f"{cfg}/Z",
+                phi_pred_test=phi_pred_test_z,
+                y_test_4c=territory_4c_test,
+                phi_pred_ptbxl=phi_pred_ptbxl_z,
+                y_ptbxl_4c=primary_4c_truth,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            pb_f = pipeline_b_for_source(
+                src_name=f"{cfg}/ecg_features",
+                phi_pred_test=phi_pred_test_f,
+                y_test_4c=territory_4c_test,
+                phi_pred_ptbxl=phi_pred_ptbxl_f,
+                y_ptbxl_4c=primary_4c_truth,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            pipeline_b_results[cfg] = {"Z": pb_z, "ecg_features": pb_f}
+
+            # Diagnostic histogram on Z (the headline regressor input).
+            hist_path = out_dir / f"hist_predphi_by_territory_{cfg}.png"
+            plot_phi_pred_by_territory_4c(
+                phi_pred=phi_pred_ptbxl_z,
+                territory_truth_4c=primary_4c_truth,
+                title=(
+                    f"Pipeline B diagnostic -- predicted phi on PTB-XL by truth_4c\n"
+                    f"config={cfg}{suffix}  (phi-Ridge trained on MedalCare; "
+                    f"vertical guides at +/-2 rad = hardcoded wedge boundaries)"
+                ),
+                save_path=hist_path,
+            )
+            # CMs: calibrator (Z) 4c + 2c; hardcoded (Z) 4c.
+            cm_b_cal_path = out_dir / f"cm_B_cal_4c_{cfg}.png"
+            confusion_matrix_plot(
+                pb_z["cross_calibrator_4c"]["_y_true"],
+                pb_z["cross_calibrator_4c"]["_y_pred"],
+                TERRITORIES_4C,
+                title=(
+                    f"Pipeline B calibrator 4c -- PTB-XL CM (Z), "
+                    f"calibrator={pb_z['calibrator_name']}, config={cfg}\n"
+                    f"macro-F1 = {pb_z['cross_calibrator_4c']['macro_f1']:.3f} "
+                    f"[{pb_z['cross_calibrator_4c']['macro_f1_ci95'][0]:.3f}, "
+                    f"{pb_z['cross_calibrator_4c']['macro_f1_ci95'][1]:.3f}]  "
+                    f"p_perm = {pb_z['cross_calibrator_4c']['permutation_p_macro_f1']:.4f}"
+                ),
+                save_path=cm_b_cal_path,
+            )
+            cm_b_hard_path = out_dir / f"cm_B_hard_4c_{cfg}.png"
+            confusion_matrix_plot(
+                pb_z["cross_hardcoded_4c"]["_y_true"],
+                pb_z["cross_hardcoded_4c"]["_y_pred"],
+                TERRITORIES_4C,
+                title=(
+                    f"Pipeline B hardcoded wedges 4c -- PTB-XL CM (Z), config={cfg}\n"
+                    f"macro-F1 = {pb_z['cross_hardcoded_4c']['macro_f1']:.3f} "
+                    f"[{pb_z['cross_hardcoded_4c']['macro_f1_ci95'][0]:.3f}, "
+                    f"{pb_z['cross_hardcoded_4c']['macro_f1_ci95'][1]:.3f}]  "
+                    f"p_perm = {pb_z['cross_hardcoded_4c']['permutation_p_macro_f1']:.4f}"
+                ),
+                save_path=cm_b_hard_path,
+            )
+            print(f"    saved {hist_path}")
+            print(f"    saved {cm_b_cal_path} and {cm_b_hard_path}")
+            print(
+                f"    in-domain 4c (cal): Z={pb_z['in_domain_calibrator_4c']['macro_f1']:.3f}  | "
+                f"cross 4c cal:   Z={pb_z['cross_calibrator_4c']['macro_f1']:.3f}  "
+                f"hard: Z={pb_z['cross_hardcoded_4c']['macro_f1']:.3f}  | "
+                f"cross 2c cal:   Z={pb_z['cross_calibrator_2c']['macro_f1']:.3f}  "
+                f"hard: Z={pb_z['cross_hardcoded_2c']['macro_f1']:.3f}  "
+                f"(NK2 cal CD 4c={pb_f['cross_calibrator_4c']['macro_f1']:.3f})"
+            )
+
+        # ---- Section 10: 8-class in-domain audit (MedalCare only) ----
+        if do_pipeline_8c:
+            print(f"  [{cfg}] 8-CLASS AUDIT (MedalCare in-domain only)")
+            audit_z = in_domain_8c_for_source(
+                src_name=f"{cfg}/Z",
+                X_train_std=Z_train_std,
+                X_test_std=Z_test_std,
+                y_train_8c=territory_8c_train,
+                y_test_8c=territory_8c_test,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            audit_f = in_domain_8c_for_source(
+                src_name=f"{cfg}/ecg_features",
+                X_train_std=F_train_std,
+                X_test_std=F_test_std,
+                y_train_8c=territory_8c_train,
+                y_test_8c=territory_8c_test,
+                rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
+            )
+            audit_8c_results[cfg] = {"Z": audit_z, "ecg_features": audit_f}
+
+            # 8x8 CM plot (Z source -- this is the publishable headline).
+            cm_8c_path = out_dir / f"cm_8c_{cfg}.png"
+            confusion_matrix_plot(
+                audit_z["in_domain_8c"]["_y_true"],
+                audit_z["in_domain_8c"]["_y_pred"],
+                TERRITORIES_8C,
+                title=(
+                    f"8-class audit -- MedalCare test CM (Z), config={cfg}\n"
+                    f"8c macro-F1 = {audit_z['in_domain_8c']['macro_f1']:.3f}  | "
+                    f"4c anatomy collapse = {audit_z['in_domain_4c_anatomy']['macro_f1']:.3f}  | "
+                    f"2c transmurality = {audit_z['in_domain_2c_transmurality']['macro_f1']:.3f}"
+                ),
+                save_path=cm_8c_path,
+            )
+            print(f"    saved {cm_8c_path}")
+            print(
+                f"    Z 8c macro-F1 = {audit_z['in_domain_8c']['macro_f1']:.3f} "
+                f"[{audit_z['in_domain_8c']['macro_f1_ci95'][0]:.3f}, "
+                f"{audit_z['in_domain_8c']['macro_f1_ci95'][1]:.3f}]  | "
+                f"4c anatomy = {audit_z['in_domain_4c_anatomy']['macro_f1']:.3f}  | "
+                f"2c trans = {audit_z['in_domain_2c_transmurality']['macro_f1']:.3f}  "
+                f"(NK2 8c = {audit_f['in_domain_8c']['macro_f1']:.3f})"
+            )
+
         # Strip internal-only keys before serialising.
         for src in cfg_result:
             if src in SOURCES:
@@ -1070,6 +1957,232 @@ def main() -> None:
                 f"{z3['permutation_p_macro_f1']:>9.4f}  "
                 f"{f3['macro_f1']:>6.3f} [{f3['macro_f1_ci95'][0]:>5.3f},{f3['macro_f1_ci95'][1]:>5.3f}]  "
                 f"{z2['macro_f1']:>10.3f}  {f2['macro_f1']:>12.3f}"
+            )
+
+    # Pipeline A JSON + summary.
+    if do_pipeline_a:
+        pa_payload_results: Dict[str, Dict[str, object]] = {}
+        for cfg, srcs in pipeline_a_results.items():
+            pa_payload_results[cfg] = {}
+            for src_name, leg in srcs.items():
+                pa_payload_results[cfg][src_name] = {
+                    "best_C": leg["best_C"],
+                    "cv_scores_per_C": leg["cv_scores_per_C"],
+                    "in_domain_4c": _strip_internal(leg["in_domain_4c"]),
+                    "cross_domain_4c": _strip_internal(leg["cross_domain_4c"]),
+                    "cross_domain_2c": _strip_internal(leg["cross_domain_2c"]),
+                }
+
+        pa_payload = {
+            "metadata": {
+                "configs": configs,
+                "sources": SOURCES,
+                "territories_4c": TERRITORIES_4C,
+                "territories_2c": TERRITORIES_2C,
+                "territory_4c_to_2c": TERRITORY_4C_TO_2C,
+                "n_train_medalcare_4c": {
+                    t: int((territory_4c_train == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_test_medalcare_4c": {
+                    t: int((territory_4c_test == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_ptbxl_primary_4c": int(primary_4c_idx.size),
+                "n_per_class_truth_ptbxl_4c": {
+                    t: int((primary_4c_truth == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_per_class_truth_ptbxl_2c": {
+                    t: int((primary_4c_truth_2c == t).sum()) for t in TERRITORIES_2C
+                },
+                "logreg_Cs": LOGREG_CS_TERR_4C.tolist(),
+                "class_weight": "balanced",
+                "multi_class": "multinomial",
+                "solver": "lbfgs",
+                "max_iter": 4000,
+                "internal_cv": "StratifiedKFold(5, shuffle=True)",
+                "n_bootstrap": int(args.n_boot),
+                "n_permutation_macro_f1": int(args.n_perm_binary),
+                "ptbxl_subclass_csv": str(PTBXL_SUBCLASS_PATH.relative_to(REPO_ROOT)),
+                "seed": SEED,
+            },
+            "results": pa_payload_results,
+        }
+        out_a_path.parent.mkdir(parents=True, exist_ok=True)
+        out_a_path.write_text(json.dumps(pa_payload, indent=2), encoding="utf-8")
+        print(f"\n[done] wrote {out_a_path}")
+
+        print("\n=== Pipeline A summary (cross-domain 4-class macro-F1) ===")
+        print(
+            f"{'config':<14}  "
+            f"{'inD Z F1':>9}  {'inD NK2 F1':>11}  "
+            f"{'CD Z F1 [CI95]':>22}  {'CD Z p':>7}  "
+            f"{'CD NK2 F1 [CI95]':>22}  "
+            f"{'CD-2c Z F1':>10}  {'CD-2c NK2 F1':>12}"
+        )
+        for cfg in configs:
+            pa = pipeline_a_results[cfg]
+            z_in = pa["Z"]["in_domain_4c"]["macro_f1"]
+            f_in = pa["ecg_features"]["in_domain_4c"]["macro_f1"]
+            zcd = pa["Z"]["cross_domain_4c"]
+            fcd = pa["ecg_features"]["cross_domain_4c"]
+            zcd2 = pa["Z"]["cross_domain_2c"]["macro_f1"]
+            fcd2 = pa["ecg_features"]["cross_domain_2c"]["macro_f1"]
+            print(
+                f"{cfg:<14}  "
+                f"{z_in:>9.3f}  {f_in:>11.3f}  "
+                f"{zcd['macro_f1']:>6.3f} [{zcd['macro_f1_ci95'][0]:>5.3f},{zcd['macro_f1_ci95'][1]:>5.3f}]  "
+                f"{zcd['permutation_p_macro_f1']:>7.4f}  "
+                f"{fcd['macro_f1']:>6.3f} [{fcd['macro_f1_ci95'][0]:>5.3f},{fcd['macro_f1_ci95'][1]:>5.3f}]  "
+                f"{zcd2:>10.3f}  {fcd2:>12.3f}"
+            )
+
+    # Pipeline B JSON + summary.
+    if do_pipeline_b:
+        pb_payload_results: Dict[str, Dict[str, object]] = {}
+        for cfg, srcs in pipeline_b_results.items():
+            pb_payload_results[cfg] = {}
+            for src_name, leg in srcs.items():
+                pb_payload_results[cfg][src_name] = {
+                    "calibrator_name": leg["calibrator_name"],
+                    "calibrator_cv_scores": leg["calibrator_cv_scores"],
+                    "phi_4c_outer_boundary_rad": leg["phi_4c_outer_boundary_rad"],
+                    "phi_4c_inner_boundary_rad": leg["phi_4c_inner_boundary_rad"],
+                    "in_domain_calibrator_4c": _strip_internal(leg["in_domain_calibrator_4c"]),
+                    "in_domain_hardcoded_4c": _strip_internal(leg["in_domain_hardcoded_4c"]),
+                    "cross_calibrator_4c": _strip_internal(leg["cross_calibrator_4c"]),
+                    "cross_calibrator_2c": _strip_internal(leg["cross_calibrator_2c"]),
+                    "cross_hardcoded_4c": _strip_internal(leg["cross_hardcoded_4c"]),
+                    "cross_hardcoded_2c": _strip_internal(leg["cross_hardcoded_2c"]),
+                }
+
+        pb_payload = {
+            "metadata": {
+                "configs": configs,
+                "sources": SOURCES,
+                "territories_4c": TERRITORIES_4C,
+                "territories_2c": TERRITORIES_2C,
+                "territory_4c_to_2c": TERRITORY_4C_TO_2C,
+                "phi_4c_outer_boundary_rad": PHI_4C_OUTER_BOUNDARY,
+                "phi_4c_inner_boundary_rad": PHI_4C_INNER_BOUNDARY,
+                "calibrator_candidates": ["tree_d4", "logreg_l2", "knn_10"],
+                "calibrator_cv": "StratifiedKFold(5, shuffle=True)",
+                "n_train_medalcare_4c": {
+                    t: int((territory_4c_train == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_test_medalcare_4c": {
+                    t: int((territory_4c_test == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_ptbxl_primary_4c": int(primary_4c_idx.size),
+                "n_per_class_truth_ptbxl_4c": {
+                    t: int((primary_4c_truth == t).sum()) for t in TERRITORIES_4C
+                },
+                "n_per_class_truth_ptbxl_2c": {
+                    t: int((primary_4c_truth_2c == t).sum()) for t in TERRITORIES_2C
+                },
+                "n_bootstrap": int(args.n_boot),
+                "n_permutation_macro_f1": int(args.n_perm_binary),
+                "ptbxl_subclass_csv": str(PTBXL_SUBCLASS_PATH.relative_to(REPO_ROOT)),
+                "seed": SEED,
+            },
+            "results": pb_payload_results,
+        }
+        out_b_path.parent.mkdir(parents=True, exist_ok=True)
+        out_b_path.write_text(json.dumps(pb_payload, indent=2), encoding="utf-8")
+        print(f"\n[done] wrote {out_b_path}")
+
+        print("\n=== Pipeline B summary (calibrator vs hardcoded, cross-domain 4c) ===")
+        print(
+            f"{'config':<14}  {'cal':>9}  "
+            f"{'inD-cal Z':>9}  "
+            f"{'CD-cal Z F1 [CI95]':>22}  {'p_cal':>6}  "
+            f"{'CD-hard Z F1 [CI95]':>22}  {'p_hard':>6}  "
+            f"{'delta(cal-hard) 4c':>18}  "
+            f"{'CD2-cal Z':>9}  {'CD2-hard Z':>10}"
+        )
+        for cfg in configs:
+            pb = pipeline_b_results[cfg]
+            zcal = pb["Z"]["cross_calibrator_4c"]
+            zhard = pb["Z"]["cross_hardcoded_4c"]
+            zcal2 = pb["Z"]["cross_calibrator_2c"]["macro_f1"]
+            zhard2 = pb["Z"]["cross_hardcoded_2c"]["macro_f1"]
+            zind = pb["Z"]["in_domain_calibrator_4c"]["macro_f1"]
+            print(
+                f"{cfg:<14}  "
+                f"{pb['Z']['calibrator_name']:>9}  "
+                f"{zind:>9.3f}  "
+                f"{zcal['macro_f1']:>6.3f} [{zcal['macro_f1_ci95'][0]:>5.3f},{zcal['macro_f1_ci95'][1]:>5.3f}]  "
+                f"{zcal['permutation_p_macro_f1']:>6.4f}  "
+                f"{zhard['macro_f1']:>6.3f} [{zhard['macro_f1_ci95'][0]:>5.3f},{zhard['macro_f1_ci95'][1]:>5.3f}]  "
+                f"{zhard['permutation_p_macro_f1']:>6.4f}  "
+                f"{zcal['macro_f1'] - zhard['macro_f1']:>+18.3f}  "
+                f"{zcal2:>9.3f}  {zhard2:>10.3f}"
+            )
+
+    # 8-class audit JSON + summary.
+    if do_pipeline_8c:
+        a8_payload_results: Dict[str, Dict[str, object]] = {}
+        for cfg, srcs in audit_8c_results.items():
+            a8_payload_results[cfg] = {}
+            for src_name, leg in srcs.items():
+                a8_payload_results[cfg][src_name] = {
+                    "best_C": leg["best_C"],
+                    "cv_scores_per_C": leg["cv_scores_per_C"],
+                    "in_domain_8c":               _strip_internal(leg["in_domain_8c"]),
+                    "in_domain_4c_anatomy":       _strip_internal(leg["in_domain_4c_anatomy"]),
+                    "in_domain_2c_transmurality": _strip_internal(leg["in_domain_2c_transmurality"]),
+                }
+
+        a8_payload = {
+            "metadata": {
+                "configs": configs,
+                "sources": SOURCES,
+                "territories_8c": TERRITORIES_8C,
+                "territories_4c": TERRITORIES_4C,
+                "transmurality_labels": TRANSMURALITY_LABELS,
+                "territory_8c_to_4c": TERRITORY_8C_TO_4C,
+                "territory_8c_to_transmurality": TERRITORY_8C_TO_TRANS,
+                "n_train_medalcare_8c": {
+                    t: int((territory_8c_train == t).sum()) for t in TERRITORIES_8C
+                },
+                "n_test_medalcare_8c": {
+                    t: int((territory_8c_test == t).sum()) for t in TERRITORIES_8C
+                },
+                "logreg_Cs": LOGREG_CS_TERR_8C.tolist(),
+                "class_weight": "balanced",
+                "multi_class": "multinomial",
+                "solver": "lbfgs",
+                "max_iter": 4000,
+                "internal_cv": "StratifiedKFold(5, shuffle=True)",
+                "n_bootstrap": int(args.n_boot),
+                "n_permutation_macro_f1": int(args.n_perm_binary),
+                "seed": SEED,
+            },
+            "results": a8_payload_results,
+        }
+        out_8c_path.parent.mkdir(parents=True, exist_ok=True)
+        out_8c_path.write_text(json.dumps(a8_payload, indent=2), encoding="utf-8")
+        print(f"\n[done] wrote {out_8c_path}")
+
+        print("\n=== 8-class audit summary (in-domain MedalCare) ===")
+        print(
+            f"{'config':<14}  "
+            f"{'8c Z F1 [CI95]':>22}  {'p_perm':>7}  "
+            f"{'4c anat Z F1':>13}  {'2c trans Z F1':>14}  "
+            f"{'8c NK2 F1':>9}  {'4c NK2 F1':>9}  {'2c NK2 F1':>9}"
+        )
+        for cfg in configs:
+            a = audit_8c_results[cfg]
+            z8 = a["Z"]["in_domain_8c"]
+            z4 = a["Z"]["in_domain_4c_anatomy"]["macro_f1"]
+            z2 = a["Z"]["in_domain_2c_transmurality"]["macro_f1"]
+            f8 = a["ecg_features"]["in_domain_8c"]["macro_f1"]
+            f4 = a["ecg_features"]["in_domain_4c_anatomy"]["macro_f1"]
+            f2 = a["ecg_features"]["in_domain_2c_transmurality"]["macro_f1"]
+            print(
+                f"{cfg:<14}  "
+                f"{z8['macro_f1']:>6.3f} [{z8['macro_f1_ci95'][0]:>5.3f},{z8['macro_f1_ci95'][1]:>5.3f}]  "
+                f"{z8['permutation_p_macro_f1']:>7.4f}  "
+                f"{z4:>13.3f}  {z2:>14.3f}  "
+                f"{f8:>9.3f}  {f4:>9.3f}  {f2:>9.3f}"
             )
 
 
