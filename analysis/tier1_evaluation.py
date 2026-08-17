@@ -126,6 +126,15 @@ CONFIG_LATENT_PATHS: Dict[str, Dict[str, Path]] = {
     "exp7_bottleneck_K256": _bottleneck_paths("exp7_bottleneck_K256"),
     "exp7_bottleneck_K64":  _bottleneck_paths("exp7_bottleneck_K64"),
     "exp7_bottleneck_K16":  _bottleneck_paths("exp7_bottleneck_K16"),
+    # Stage 3 of the 2026-08-10 audit. Not in DEFAULT_CONFIGS: these are a
+    # separate comparison family (post-lead-fix), and silently mixing them into
+    # the K-sweep table would compare across two different lead orders. Select
+    # them explicitly with --configs.
+    "exp8_leadfix_baseline": _bottleneck_paths("exp8_leadfix_baseline"),
+    "exp8_leadfix_ccmmd":    _bottleneck_paths("exp8_leadfix_ccmmd"),
+    "exp8_leadfix_dual":     _bottleneck_paths("exp8_leadfix_dual"),
+    "exp8_leadfix_globalz":  _bottleneck_paths("exp8_leadfix_globalz"),
+    "exp8_leadfix_K64":      _bottleneck_paths("exp8_leadfix_K64"),
 }
 # Nominal K for table labelling (also used to detect the K=1024 reference row).
 CONFIG_K: Dict[str, int] = {
@@ -133,6 +142,11 @@ CONFIG_K: Dict[str, int] = {
     "exp7_bottleneck_K256": 256,
     "exp7_bottleneck_K64":  64,
     "exp7_bottleneck_K16":  16,
+    "exp8_leadfix_baseline": 1024,
+    "exp8_leadfix_ccmmd":    1024,
+    "exp8_leadfix_dual":     1024,
+    "exp8_leadfix_globalz":  1024,
+    "exp8_leadfix_K64":      64,
 }
 
 

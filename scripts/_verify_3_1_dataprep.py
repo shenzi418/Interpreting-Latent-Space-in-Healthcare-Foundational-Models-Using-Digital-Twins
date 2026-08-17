@@ -109,7 +109,19 @@ for name, mask in samples.items():
 # MedalCare
 # ---------------------------------------------------------------------------
 print("\n=== MedalCare NPZs ===")
-EXPECTED_4C_TEST = {"Anteroseptal": 400, "Anterolateral": 200, "Inferior": 400, "Inferolateral": 200}
+# territory_4c is derived from phi, NOT from the folder name (the "D1 fix",
+# scripts/build_medalcare_isch_targets.py:120-143). MedalCare-XL's own parameter
+# files put LCX_0.3_post in the *positive* phi wedge -- the same wedge as
+# LCX_0.3_ant -- while LCX_1.0_post is negative. Verified 2026-08-11 by reading
+# isch[0].phi straight out of
+# WP2_largeDataset_ParameterFiles/mi/LCX_0.3_post/test/run_S62/*Ventricular*.txt
+# (+2.03, +2.27, +2.64). So the upstream folder name contradicts the geometry
+# that was actually simulated, and phi wins.
+#
+# Consequence for the counts below: the 100 LCX_0.3_post test rows land in
+# Anterolateral, not Inferolateral. These constants used to encode the
+# folder-derived expectation (200/200) and failed on correct data.
+EXPECTED_4C_TEST = {"Anteroseptal": 400, "Anterolateral": 300, "Inferior": 400, "Inferolateral": 100}
 EXPECTED_8C_TEST = {
     "LAD_0.3": 200, "LAD_1.0": 200,
     "LCX_0.3_ant": 100, "LCX_0.3_post": 100, "LCX_1.0_ant": 100, "LCX_1.0_post": 100,
@@ -125,7 +137,8 @@ for split in ("train", "val", "test"):
     d = dict(np.load(p, allow_pickle=True))
 
     required = ["idx_in_split", "phi", "z", "size", "rho_eps_max", "coronary",
-                "lcx_subtype", "transmural", "territory_4c", "territory_8c"]
+                "lcx_subtype", "transmural", "territory_4c", "territory_4c_folder",
+                "territory_8c"]
     for k in required:
         if k not in d:
             fail(f"{split}: missing key {k}")
@@ -154,9 +167,15 @@ for split in ("train", "val", "test"):
     else:
         ok(f"{split}: all territory_8c in valid set")
 
-    # Consistency: territory_4c <-> (coronary, lcx_subtype)
+    # Consistency: territory_4c <-> (coronary, lcx_subtype).
+    # Checked against territory_4c_folder, which is what the folder name implies.
+    # territory_4c itself is phi-derived and legitimately departs from the folder
+    # for LCX_0.3_post (see the EXPECTED_4C_TEST comment). Asserting the
+    # folder rule against the phi-derived column is what made this check fail on
+    # correct data; the real invariant is that the two columns agree everywhere
+    # EXCEPT that one documented bucket.
     mismatches = 0
-    for c, s, t4 in zip(d["coronary"], d["lcx_subtype"], d["territory_4c"]):
+    for c, s, t4 in zip(d["coronary"], d["lcx_subtype"], d["territory_4c_folder"]):
         if c == "LAD" and t4 != "Anteroseptal":
             mismatches += 1
         elif c == "RCA" and t4 != "Inferior":
@@ -167,9 +186,22 @@ for split in ("train", "val", "test"):
             elif s == "post" and t4 != "Inferolateral":
                 mismatches += 1
     if mismatches > 0:
-        fail(f"{split}: {mismatches} rows with inconsistent territory_4c vs (coronary, lcx_subtype)")
+        fail(f"{split}: {mismatches} rows with inconsistent territory_4c_folder "
+             f"vs (coronary, lcx_subtype)")
     else:
-        ok(f"{split}: territory_4c <-> (coronary, lcx_subtype) consistent")
+        ok(f"{split}: territory_4c_folder <-> (coronary, lcx_subtype) consistent")
+
+    # phi-derived vs folder-derived: disagreement is expected, but ONLY for
+    # LCX_*_post. Anything else means the phi wedges have shifted.
+    disagree = d["territory_4c"] != d["territory_4c_folder"]
+    off_bucket = sorted({b for b in d["territory_8c"][disagree].tolist()
+                         if not b.endswith("_post")})
+    if off_bucket:
+        fail(f"{split}: phi/folder disagreement outside LCX_*_post: {off_bucket}")
+    else:
+        ok(f"{split}: {int(disagree.sum())} phi/folder disagreements, all in "
+           f"{sorted(set(d['territory_8c'][disagree].tolist())) or '[]'} "
+           f"(documented upstream erratum)")
 
     # territory_8c consistency
     mismatches = 0

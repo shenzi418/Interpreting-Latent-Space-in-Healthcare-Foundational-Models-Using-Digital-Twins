@@ -28,8 +28,10 @@ Writes only:
 Usage
 -----
     python scripts/_diag_c2st_leadfix.py
+    python scripts/_diag_c2st_leadfix.py --runs exp8_leadfix_baseline exp8_leadfix_ccmmd
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -121,28 +123,77 @@ def knn_mixing(X: np.ndarray, Y: np.ndarray, k: int = 10) -> float:
     return float(other)
 
 
+# Each entry is (label, medalcare_train_dir, medalcare_test_dir,
+#                ptbxl_train_dir, ptbxl_test_dir).
+# The three defaults all share the exp7 PTB-XL export because they are
+# re-exports from the SAME frozen exp7_baseline checkpoint -- only the MedalCare
+# side changes. The exp8 runs each trained their own encoder, so their PTB-XL
+# latents differ per run and must be paired accordingly (see `exp8_configs`).
 CONFIGS = [
     ("as_shipped        (MedalCare aVL/aVF SWAPPED, global z)",
-     "exp7_medalcare_train", "exp7_medalcare"),
+     "exp7_medalcare_train", "exp7_medalcare", "exp7_ptbxl_train", "exp7_ptbxl"),
     ("leadfix           (MedalCare CORRECT order, global z)",
-     "exp7_medalcare_train_unswapped", "exp7_medalcare_unswapped"),
+     "exp7_medalcare_train_unswapped", "exp7_medalcare_unswapped",
+     "exp7_ptbxl_train", "exp7_ptbxl"),
     ("leadfix + perlead (MedalCare CORRECT order, per-lead z)",
-     "exp7_medalcare_train_unswapped_perlead", "exp7_medalcare_unswapped_perlead"),
+     "exp7_medalcare_train_unswapped_perlead", "exp7_medalcare_unswapped_perlead",
+     "exp7_ptbxl_train", "exp7_ptbxl"),
 ]
 
 
+def exp8_configs(run_ids):
+    """Config tuples for Stage-3 retrained runs.
+
+    The three default CONFIGS re-export a frozen exp7 checkpoint under different
+    lead orders -- they answer "does the *representation* change when you feed it
+    correct leads". These answer the harder question: does a model **trained**
+    from the start on correct leads land somewhere different? That is the actual
+    decision point in §5 of the audit, and it needs each run's own PTB-XL export.
+    """
+    return [
+        (f"{rid:<50s}(trained on correct leads)",
+         f"{rid}_medalcare_train", f"{rid}_medalcare_test",
+         f"{rid}_ptbxl_train", f"{rid}_ptbxl_test")
+        for rid in run_ids
+    ]
+
+
 def main():
-    rng = np.random.default_rng(SEED)
-    Z_ptb_tr, Z_ptb_te = L("exp7_ptbxl_train"), L("exp7_ptbxl")
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument(
+        "--runs", nargs="*", default=None,
+        help="Stage-3 run IDs (e.g. exp8_leadfix_baseline) to measure INSTEAD of "
+             "the default frozen-checkpoint re-export comparison. Each run must "
+             "have its own <run>_{medalcare,ptbxl}_{train,test} exports.",
+    )
+    ap.add_argument(
+        "--out", type=Path, default=None,
+        help="Output JSON. Default: c2st_leadfix.json for the built-in configs, "
+             "c2st_leadfix_trained.json when --runs is given (so the two never "
+             "overwrite each other).",
+    )
+    args = ap.parse_args()
+
+    if args.runs:
+        configs = exp8_configs(args.runs)
+        out_path = args.out or (OUT_DIR / "c2st_leadfix_trained.json")
+    else:
+        configs = CONFIGS
+        out_path = args.out or (OUT_DIR / "c2st_leadfix.json")
+
     results = {}
 
-    print(f"PTB-XL train {Z_ptb_tr.shape}  test {Z_ptb_te.shape}\n")
     print(f"{'config':<58} {'C2ST cv':>9} {'C2ST held':>10} "
           f"{'MMD':>10} {'kNN mix':>9}")
     print("-" * 100)
 
-    for label, med_tr_name, med_te_name in CONFIGS:
-        Z_med_tr, Z_med_te = L(med_tr_name), L(med_te_name)
+    for label, med_tr_name, med_te_name, ptb_tr_name, ptb_te_name in configs:
+        try:
+            Z_med_tr, Z_med_te = L(med_tr_name), L(med_te_name)
+            Z_ptb_tr, Z_ptb_te = L(ptb_tr_name), L(ptb_te_name)
+        except FileNotFoundError as exc:
+            print(f"{label:<58} SKIP -- missing export: {exc}")
+            continue
 
         a_te, b_te = balance(Z_med_te, Z_ptb_te, np.random.default_rng(SEED))
         a_tr, b_tr = balance(Z_med_tr, Z_ptb_tr, np.random.default_rng(SEED))
@@ -161,6 +212,7 @@ def main():
         results[label.split()[0]] = {
             "label": label, "medalcare_train": med_tr_name,
             "medalcare_test": med_te_name,
+            "ptbxl_train": ptb_tr_name, "ptbxl_test": ptb_te_name,
             "n_medalcare_test": int(len(a_te)), "n_ptbxl_test": int(len(b_te)),
             "c2st_auroc_cv": cv, "c2st_auroc_heldout": ho,
             "mmd2_multibandwidth_unbiased": mmd, "knn_mixing_k10": knn,
@@ -169,9 +221,9 @@ def main():
 
     print("\n(kNN mixing: 0.5 = perfectly mixed domains, 0.0 = fully separated)")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    with open(OUT_DIR / "c2st_leadfix.json", "w", encoding="utf-8") as fh:
+    with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
-    print(f"\nwrote {OUT_DIR / 'c2st_leadfix.json'}")
+    print(f"\nwrote {out_path}")
 
 
 if __name__ == "__main__":

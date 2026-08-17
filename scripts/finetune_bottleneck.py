@@ -62,6 +62,7 @@ from scripts.finetune_multilabel import (  # noqa: E402
     _evaluate_shared_head,
     build_shared_head_loaders,
     remap_labels,
+    resolve_run_dir,
     select_primary_metric,
     set_deterministic,
     summarise_macro,
@@ -231,8 +232,9 @@ def run_bottleneck(args: argparse.Namespace) -> None:
     set_deterministic(args.seed)
     metrics_to_compute = validate_metrics(args.metrics.split(","))
 
-    run_id = args.run_id or f"exp7_bottleneck_K{args.bottleneck_dim}"
-    out_dir = (DEFAULT_OUTPUTS / run_id).resolve()
+    run_id, out_dir = resolve_run_dir(
+        args.run_id or f"exp7_bottleneck_K{args.bottleneck_dim}", args.overwrite
+    )
     ckpt_dir = out_dir / "checkpoints"
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -436,6 +438,8 @@ def parse_args() -> argparse.Namespace:
     # Training
     p.add_argument("--run-id", type=str, default=None,
                    help="Output dir name. Default: exp7_bottleneck_K{K}.")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Allow reusing a --run-id whose metrics.json already exists.")
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--patience", type=int, default=5,
                    help="Early-stop patience on val avg-domain F1.")

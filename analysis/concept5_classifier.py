@@ -89,6 +89,7 @@ from analysis.eval_decoding_lowK import (  # noqa: E402
     TERRITORIES_4C,
     SEED, N_BOOT, N_PERM,
     RIDGE_ALPHAS, LOGREG_CS_BIN, LOGREG_CS_TERR,
+    derive_rng,
 )
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -201,9 +202,11 @@ def eval_classifier(
 ) -> Dict[str, object]:
     in_dom = score_block(
         y_test, model.predict(X_test), model.predict_proba(X_test), rng=rng,
+        proba_labels=list(model.classes_),
     )
     cd = score_block(
         y_ptbxl, model.predict(X_ptbxl), model.predict_proba(X_ptbxl), rng=rng,
+        proba_labels=list(model.classes_),
     )
     return {"in_domain_4c": in_dom, "cross_domain_4c": cd}
 
@@ -352,7 +355,9 @@ def main() -> int:
     med_audit_df.to_csv(med_audit_path, index=False)
     print(f"[save] {med_audit_path.relative_to(REPO_ROOT)}")
 
-    rng = np.random.default_rng(SEED)
+    # m10 fix: each reported cell gets its own deterministic stream keyed on
+    # its identity, so --ablations / --mlp / --gt-upper-bound no longer shift
+    # the numbers of the cells that would have run anyway.
 
     # ----- Main classifier on predicted 5-vec -----
     y_train_4c = np.asarray(targets["train"]["territory_4c"].tolist(), dtype=object)
@@ -365,7 +370,8 @@ def main() -> int:
     model, best_C, cv_scores = fit_classifier(Xc_tr, y_train_4c)
     print(f"[main] best_C={best_C:g}  cv_macro_f1={cv_scores[str(best_C)]:.3f}")
     main_block = eval_classifier(
-        model, Xc_tr, y_train_4c, Xc_te, y_test_4c, Xc_pt, ptbxl_truth, rng,
+        model, Xc_tr, y_train_4c, Xc_te, y_test_4c, Xc_pt, ptbxl_truth,
+        derive_rng("concept5", "main", seed=SEED),
     )
     id_ = main_block["in_domain_4c"]; cd = main_block["cross_domain_4c"]
     print(f"[main] in_dom F1={id_['macro_f1']:.3f}  AUC={id_['macro_auc_ovr']}")
@@ -397,7 +403,8 @@ def main() -> int:
             Xa_pt = Xc_pt[:, mask]
             m_a, bc_a, _ = fit_classifier(Xa_tr, y_train_4c)
             blk = eval_classifier(
-                m_a, Xa_tr, y_train_4c, Xa_te, y_test_4c, Xa_pt, ptbxl_truth, rng,
+                m_a, Xa_tr, y_train_4c, Xa_te, y_test_4c, Xa_pt, ptbxl_truth,
+                derive_rng("concept5", "ablate", name, seed=SEED),
             )
             ablations[f"drop_{name}"] = {
                 "best_C": bc_a,
@@ -435,7 +442,8 @@ def main() -> int:
                 return self.base.predict_proba(X)
         mlp_w = _MLPWrapper(mlp, le)
         mlp_block = eval_classifier(
-            mlp_w, Xc_tr, y_train_4c, Xc_te, y_test_4c, Xc_pt, ptbxl_truth, rng,
+            mlp_w, Xc_tr, y_train_4c, Xc_te, y_test_4c, Xc_pt, ptbxl_truth,
+            derive_rng("concept5", "mlp", seed=SEED),
         )
         results["mlp"] = {
             "in_domain_4c": mlp_block["in_domain_4c"],
@@ -467,7 +475,9 @@ def main() -> int:
         Xg_te = gt_scaler.transform(gt_te)
         m_g, bc_g, cv_g = fit_classifier(Xg_tr, y_train_4c)
         in_blk = score_block(
-            y_test_4c, m_g.predict(Xg_te), m_g.predict_proba(Xg_te), rng=rng,
+            y_test_4c, m_g.predict(Xg_te), m_g.predict_proba(Xg_te),
+            rng=derive_rng("concept5", "gt_upper_bound", seed=SEED),
+            proba_labels=list(m_g.classes_),
         )
         results["gt_upper_bound"] = {
             "best_C": bc_g,

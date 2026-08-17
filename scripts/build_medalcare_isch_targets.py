@@ -35,6 +35,7 @@ import argparse
 import json
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -43,6 +44,17 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+# pylint: disable=wrong-import-position
+from scripts.medalcare_paths import (  # noqa: E402
+    assert_label_schema,
+    is_mi_path,
+    parse_territory_from_path,
+)
 
 DEFAULT_MANIFEST = REPO_ROOT / "data" / "medalcare_filtered_manifest_dataset_split.csv"
 DEFAULT_OUTDIR = REPO_ROOT / "data"
@@ -84,9 +96,14 @@ TERRITORIES_8C: Tuple[str, ...] = (
 
 
 def derive_territory_4c(coronary: str, lcx_subtype: str) -> str:
-    """Map (coronary, lcx_subtype) -> 4-class anatomical territory.
+    """Map (coronary, lcx_subtype) -> 4-class territory from the FOLDER NAME.
 
     Returns one of TERRITORIES_4C, or "" if the input is unrecognised.
+
+    NOTE (defect D1, 2026-08-10): this is the *metadata* labelling and it
+    contradicts the simulated geometry for the rho=0.3 LCX buckets. It is kept
+    only to populate ``territory_4c_folder`` for the sensitivity analysis. The
+    canonical label is now ``derive_territory_4c_from_phi``.
     """
     if coronary == "LAD":
         return "Anteroseptal"
@@ -98,6 +115,57 @@ def derive_territory_4c(coronary: str, lcx_subtype: str) -> str:
         if lcx_subtype == "post":
             return "Inferolateral"
     return ""
+
+
+# --- D1 fix: phi wedges -------------------------------------------------------
+# Empirically verified against all three splits of theta_mi_*.npz (2026-08-10).
+# Every folder bucket occupies a clean, non-overlapping phi wedge:
+#
+#   bucket          folder ->4c      phi range           phi circ-mean
+#   LAD_0.3         Anteroseptal     [+0.000, +1.999]    +1.00
+#   LAD_1.0         Anteroseptal     [+0.000, +1.997]    +1.00
+#   LCX_0.3_ant     Anterolateral    [+2.003, +3.139]    +2.57
+#   LCX_0.3_post    Inferolateral    [+2.003, +3.140]    +2.57   <-- SAME WEDGE
+#   LCX_1.0_ant     Anterolateral    [+2.004, +3.139]    +2.57
+#   LCX_1.0_post    Inferolateral    [-3.139, -2.006]    -2.57
+#   RCA_0.3         Inferior         [-1.999, -0.003]    -1.00
+#   RCA_1.0         Inferior         [-1.997, -0.001]    -1.00
+#
+# ``LCX_0.3_ant`` and ``LCX_0.3_post`` are the same distribution in all four
+# theta parameters under two different labels, so no decoder -- not even an
+# oracle with perfect theta knowledge -- can separate them. That caps the
+# 4-class task at accuracy 0.9167 / macro-F1 0.8643 with Inferolateral recall
+# pinned at exactly 0.500, and every 4c number in the project had been compared
+# against an implicit ceiling of 1.0.
+#
+# phi is the actual simulated geometry; the folder name records the *intent* of
+# the simulation batch, not the physics. So phi wins.
+PHI_4C_OUTER_BOUNDARY = 2.0   # |phi| > 2.0  -> lateral
+PHI_4C_INNER_BOUNDARY = 0.0   # sign of phi  -> anterior (+) vs inferior (-)
+
+
+def derive_territory_4c_from_phi(phi: float) -> str:
+    """Map ``isch[0].phi`` -> 4-class anatomical territory (canonical, D1 fix).
+
+    Wedges, on phi wrapped to [-pi, +pi]:
+
+        [ 0.0, +2.0]  -> Anteroseptal
+        (+2.0, +pi ]  -> Anterolateral
+        [-2.0,  0.0)  -> Inferior
+        [-pi,  -2.0)  -> Inferolateral
+
+    These are the same boundaries used by ``hardcoded_phi_to_4c`` in
+    ``analysis/phase_b2_infarct_decoding.py``, so the ground truth and the
+    Pipeline-B wedge baseline are now defined consistently.
+    """
+    p = float(np.arctan2(np.sin(phi), np.cos(phi)))  # wrap to [-pi, +pi]
+    if p > PHI_4C_OUTER_BOUNDARY:
+        return "Anterolateral"
+    if p >= PHI_4C_INNER_BOUNDARY:
+        return "Anteroseptal"
+    if p >= -PHI_4C_OUTER_BOUNDARY:
+        return "Inferior"
+    return "Inferolateral"
 
 
 def derive_territory_8c(coronary: str, lcx_subtype: str, transmural: float) -> str:
@@ -176,48 +244,10 @@ def parameter_path_for_csv(original_csv_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Path-derived metadata
 # ---------------------------------------------------------------------------
-
-_TERRITORY_RE = re.compile(r"[\\/]mi[\\/]([^\\/]+)[\\/]", re.IGNORECASE)
-
-
-def parse_territory_from_path(p: str) -> Tuple[str, str, float]:
-    """Extract (coronary_artery, lcx_subtype, transmural_label) from path.
-
-    Returns
-    -------
-    coronary_artery : str
-        One of ``{"LAD", "LCX", "RCA"}``.
-    lcx_subtype : str
-        ``"ant"`` or ``"post"`` for LCX, otherwise ``""``.
-    transmural_label : float
-        Encoded as ``0.3`` or ``1.0`` (matches ``isch[0].rho_eps_max``).
-    """
-    m = _TERRITORY_RE.search(p)
-    if not m:
-        raise ValueError(f"Cannot parse MI territory from path: {p}")
-    folder = m.group(1)  # e.g. 'LAD_0.3', 'LCX_1.0_ant', 'RCA_0.3'
-    pieces = folder.split("_")
-    coronary = pieces[0].upper()
-    if coronary not in {"LAD", "LCX", "RCA"}:
-        raise ValueError(f"Unknown coronary artery '{coronary}' in '{folder}'")
-    try:
-        transmural = float(pieces[1])
-    except (IndexError, ValueError) as exc:
-        raise ValueError(f"Cannot parse transmural label in '{folder}'") from exc
-    if transmural not in {0.3, 1.0}:
-        raise ValueError(f"Unexpected transmural label {transmural} in '{folder}'")
-    lcx_subtype = pieces[2].lower() if (coronary == "LCX" and len(pieces) >= 3) else ""
-    if coronary == "LCX" and lcx_subtype not in {"ant", "post"}:
-        raise ValueError(f"Unexpected LCX subtype '{lcx_subtype}' in '{folder}'")
-    return coronary, lcx_subtype, transmural
-
-
-# ---------------------------------------------------------------------------
-# Build per-split target files
-# ---------------------------------------------------------------------------
-
-def is_mi_path(p: str) -> bool:
-    return "/mi/" in str(p).replace("\\", "/").lower()
+# `parse_territory_from_path` and `is_mi_path` now live in
+# `scripts/medalcare_paths.py` and match on path *segments*. The versions that
+# used to live here matched the substring "/mi/", which also fires on any
+# ancestor directory of the dataset root -- see that module's docstring.
 
 
 def build_split(
@@ -304,13 +334,58 @@ def build_split(
         for entry in transmural_mismatch[:3]:
             print(f"    -> {entry}")
 
-    territory_4c = [
+    # ---- territory_4c: canonical = derived from phi (defect D1 fix) ----------
+    # The folder-name labelling is retained as ``territory_4c_folder`` so the
+    # "keep the labels, report against the 0.867 oracle ceiling" sensitivity can
+    # be run without rebuilding.
+    territory_4c_folder = [
         derive_territory_4c(c, s) for c, s in zip(coronary, lcx_subtype)
     ]
+    territory_4c = [derive_territory_4c_from_phi(p) for p in phi]
     territory_8c = [
         derive_territory_8c(c, s, t)
         for c, s, t in zip(coronary, lcx_subtype, transmural)
     ]
+
+    # Cross-check phi-derived vs folder-derived, and FAIL on any disagreement
+    # that is not the one documented defect. LCX_*_post buckets whose phi is
+    # positive are the known D1 contradiction (the simulation is anterior by
+    # every theta parameter despite the "post" folder name); every other
+    # disagreement would mean the phi wedges are wrong and must stop the build.
+    disagree: Dict[str, int] = defaultdict(int)
+    unexpected: List[Tuple[str, str, str, float]] = []
+    for k in range(len(territory_4c)):
+        if territory_4c[k] == territory_4c_folder[k]:
+            continue
+        bucket = territory_8c[k]
+        disagree[f"{bucket}: {territory_4c_folder[k]} -> {territory_4c[k]}"] += 1
+        known_d1 = (
+            coronary[k] == "LCX"
+            and lcx_subtype[k] == "post"
+            and territory_4c_folder[k] == "Inferolateral"
+            and territory_4c[k] == "Anterolateral"
+        )
+        if not known_d1:
+            unexpected.append(
+                (run_id[k], territory_4c_folder[k], territory_4c[k], phi[k])
+            )
+
+    if disagree:
+        print(
+            f"  [D1] {split_name}: {sum(disagree.values())} rows relabelled from "
+            "folder name to phi-derived territory:"
+        )
+        for key, cnt in sorted(disagree.items()):
+            print(f"    -> {key}: {cnt}")
+    if unexpected:
+        raise ValueError(
+            f"{split_name}: {len(unexpected)} rows disagree between phi-derived "
+            "and folder-derived territory_4c in a way that is NOT the known D1 "
+            "LCX_*_post contradiction. The phi wedge boundaries or the folder "
+            f"parsing are wrong -- refusing to write targets. First 5: "
+            f"{unexpected[:5]}"
+        )
+
     target = {
         "idx_in_split": np.asarray(idx_in_split, dtype=np.int64),
         "phi": np.asarray(phi, dtype=np.float64),
@@ -322,6 +397,7 @@ def build_split(
         "transmural": np.asarray(transmural, dtype=np.float64),
         "run_id": np.asarray(run_id, dtype=object),
         "territory_4c": np.asarray(territory_4c, dtype=object),
+        "territory_4c_folder": np.asarray(territory_4c_folder, dtype=object),
         "territory_8c": np.asarray(territory_8c, dtype=object),
     }
 
@@ -432,6 +508,7 @@ def main() -> None:
     df = pd.read_csv(args.manifest)
     if "split" not in df.columns:
         raise ValueError("Manifest must include a 'split' column.")
+    assert_label_schema(df.columns)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     summaries: List[Dict[str, object]] = []

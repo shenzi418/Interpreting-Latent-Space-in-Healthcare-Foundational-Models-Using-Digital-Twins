@@ -69,6 +69,13 @@ from sklearn.metrics import (  # noqa: E402
     confusion_matrix,
 )
 
+# M6: single source of truth for the circular metrics.
+from analysis.phase_b2_infarct_decoding import (  # noqa: E402
+    circular_r2 as pb2_circular_r2,
+    circular_mean as pb2_circular_mean,
+    derive_rng,
+)
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -142,15 +149,26 @@ def load_ptbxl_primary_4c() -> Tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 
 def circular_r2(phi_true: np.ndarray, phi_pred: np.ndarray) -> float:
-    """1 - mean(1 - cos(phi_pred - phi_true)) / mean(1 - cos(phi_true - mean_phi)).
+    """DEPRECATED -- do not use. Kept only so old callers fail loudly.
 
-    Definition matches phase_b2; values in (-inf, 1].
+    FIXED 2026-08-10 (defect M6). This was a near-copy of the ``phase_b2``
+    function whose docstring claimed "definition matches phase_b2" -- it did
+    not. It centred the denominator on the circular mean of ``phi_true``
+    (the **test** mean), whereas ``phase_b2.circular_r2`` centres on the
+    **train** mean, which is the only baseline a real predictor could have used.
+    Using the test mean gives the null baseline access to the test labels and
+    inflates R²_circ. The argument order was also reversed relative to
+    ``phase_b2`` (``(true, pred)`` vs ``(pred, true)``) -- harmless for this
+    symmetric numerator, but exactly the kind of thing that silently swaps.
+
+    Use ``phase_b2_infarct_decoding.circular_r2(phi_pred, phi_true,
+    phi_train_mean)`` instead.
     """
-    eps = 1e-12
-    mean_phi = np.arctan2(np.sin(phi_true).mean(), np.cos(phi_true).mean())
-    ss_res = float((1.0 - np.cos(phi_pred - phi_true)).mean())
-    ss_tot = float((1.0 - np.cos(phi_true - mean_phi)).mean())
-    return 1.0 - ss_res / max(ss_tot, eps)
+    raise NotImplementedError(
+        "analysis.eval_decoding_lowK.circular_r2 is removed (defect M6). "
+        "Import circular_r2 from analysis.phase_b2_infarct_decoding and pass "
+        "the TRAIN circular mean explicitly."
+    )
 
 
 def fit_phi_probe(
@@ -214,8 +232,11 @@ def eval_l2_probes(
     phi_model, _ = fit_phi_probe(X_tr, phi_tr)
     Y_te_pred = phi_model.predict(X_te)
     phi_te_pred = np.arctan2(Y_te_pred[:, 0], Y_te_pred[:, 1])
+    # M6: use the canonical phase_b2 definition, centred on the TRAIN circular
+    # mean (the only baseline a real predictor could have had).
+    phi_train_mean = pb2_circular_mean(phi_tr)
     out["phi"] = {
-        "r2_circular": circular_r2(phi_te, phi_te_pred),
+        "r2_circular": pb2_circular_r2(phi_te_pred, phi_te, phi_train_mean),
         "best_alpha": float(phi_model.alpha_) if np.isscalar(phi_model.alpha_) else [
             float(a) for a in np.atleast_1d(phi_model.alpha_)
         ],
@@ -260,16 +281,41 @@ def eval_l2_probes(
 
 def macro_ovr_auc(
     y_true_str: np.ndarray, proba: np.ndarray, labels: List[str],
+    proba_labels: Optional[List[str]] = None,
 ) -> Optional[float]:
     """Macro-averaged one-vs-rest ROC-AUC.
 
-    sklearn ``roc_auc_score(multi_class='ovr', average='macro')`` would do this
-    in one call, but we want skipping behaviour when some class has no positive
-    examples in y_true. Here we just call sklearn and let it handle it; if it
-    raises, return None.
+    ``proba_labels`` gives the class each COLUMN of ``proba`` corresponds to,
+    i.e. ``list(model.classes_)``. It is required whenever that order differs
+    from ``labels``.
+
+    FIXED 2026-08-10 (defect A1). This function used to encode ``y_true`` by
+    position in ``labels`` (= TERRITORIES_4C, anatomical order) while ``proba``
+    columns follow sklearn's ``model.classes_``, which is sorted
+    ALPHABETICALLY:
+
+        TERRITORIES_4C : [Anteroseptal, Anterolateral, Inferior, Inferolateral]
+        model.classes_ : [Anterolateral, Anteroseptal, Inferior, Inferolateral]
+
+    Columns 0 and 1 are transposed, so Anteroseptal was scored with
+    P(Anterolateral) and vice versa. Every stored ``macro_auc_ovr``,
+    ``macro_auc_ovr_ci95`` and ``permutation_p_macro_auc_ovr`` produced before
+    this date is affected. The bug UNDER-states in-domain performance (K=1024
+    in-domain: 0.578 as coded vs 0.782 correct).
     """
+    if proba_labels is not None:
+        if list(proba_labels) != list(labels):
+            missing = [l for l in labels if l not in list(proba_labels)]
+            if missing:
+                raise ValueError(
+                    f"proba has no column for label(s) {missing}; "
+                    f"proba_labels={list(proba_labels)}, labels={list(labels)}"
+                )
+            order = [list(proba_labels).index(l) for l in labels]
+            proba = proba[:, order]
     try:
-        # We need to encode y_true as integer indices into `labels`
+        # y_true is encoded by position in `labels`; `proba` columns are now
+        # guaranteed to be in that same order.
         label_to_idx = {l: i for i, l in enumerate(labels)}
         y_idx = np.asarray([label_to_idx[t] for t in y_true_str], dtype=np.int64)
         # roc_auc_score in 'ovr' macro mode requires all classes present in y_true.
@@ -277,9 +323,12 @@ def macro_ovr_auc(
         if len(present) < 2:
             return None
         if len(present) < len(labels):
-            # Subset both proba columns and the label set to present
+            # Subset the proba columns to the present classes and RENORMALISE —
+            # roc_auc_score(multi_class='ovr') requires rows summing to 1.
+            # (The pre-2026-08-10 code sliced without renormalising.)
             proba_sub = proba[:, present]
-            # remap y_idx
+            row = proba_sub.sum(axis=1, keepdims=True)
+            proba_sub = proba_sub / np.clip(row, 1e-12, None)
             remap = {v: i for i, v in enumerate(present)}
             y_sub = np.asarray([remap[v] for v in y_idx], dtype=np.int64)
             return float(roc_auc_score(
@@ -291,7 +340,10 @@ def macro_ovr_auc(
             labels=list(range(len(labels))),
         ))
     except Exception as exc:
-        print(f"[warn] macro-OvR AUC failed: {exc}")
+        # Deliberately narrow reporting: a silent None here is what let the
+        # column-order bug hide. Print the class context so it is diagnosable.
+        print(f"[warn] macro-OvR AUC failed: {type(exc).__name__}: {exc} "
+              f"(labels={list(labels)}, proba.shape={np.shape(proba)})")
         return None
 
 
@@ -328,13 +380,27 @@ def score_block(
     y_true: np.ndarray, y_pred: np.ndarray, proba: np.ndarray,
     rng: np.random.Generator,
     *, n_boot: int = N_BOOT, n_perm: int = N_PERM,
+    labels: Optional[List[str]] = None,
+    proba_labels: Optional[List[str]] = None,
 ) -> Dict[str, object]:
-    labels = TERRITORIES_4C
+    """Score a block of predictions.
+
+    ``labels``       — evaluation label set (default TERRITORIES_4C). Made a
+                       parameter 2026-08-10 (defect m11): it was hardcoded, so
+                       calling this with 2-class collapsed data would have
+                       macro-averaged over two zero-support labels and roughly
+                       halved macro-F1.
+    ``proba_labels`` — the class of each COLUMN of ``proba``, i.e.
+                       ``list(model.classes_)``. Pass it whenever the model's
+                       class order may differ from ``labels`` — see the A1 note
+                       in ``macro_ovr_auc``.
+    """
+    labels = list(TERRITORIES_4C) if labels is None else list(labels)
     n = y_true.size
     macro_f1 = float(f1_score(y_true, y_pred, labels=labels,
                               average="macro", zero_division=0))
     bal_acc = float(balanced_accuracy_score(y_true, y_pred))
-    macro_auc = macro_ovr_auc(y_true, proba, labels)
+    macro_auc = macro_ovr_auc(y_true, proba, labels, proba_labels)
 
     p, r, f1, supp = precision_recall_fscore_support(
         y_true, y_pred, labels=labels, zero_division=0,
@@ -360,7 +426,7 @@ def score_block(
             average="macro", zero_division=0,
         )
         boot_bal[b] = balanced_accuracy_score(y_true[idx], y_pred[idx])
-        a = macro_ovr_auc(y_true[idx], proba[idx], labels)
+        a = macro_ovr_auc(y_true[idx], proba[idx], labels, proba_labels)
         if a is not None:
             boot_auc[b] = a
             boot_auc_has[b] = True
@@ -378,7 +444,7 @@ def score_block(
             average="macro", zero_division=0,
         )
         perm_bal[q] = balanced_accuracy_score(y_perm, y_pred)
-        a = macro_ovr_auc(y_perm, proba, labels)
+        a = macro_ovr_auc(y_perm, proba, labels, proba_labels)
         if a is not None:
             perm_auc[q] = a
             perm_auc_has[q] = True
@@ -435,12 +501,14 @@ def eval_pipeline_a(
     # In-domain
     yhat_te = model.predict(X_te)
     proba_te = model.predict_proba(X_te)
-    in_dom = score_block(y_test_4c, yhat_te, proba_te, rng=rng)
+    in_dom = score_block(y_test_4c, yhat_te, proba_te, rng=rng,
+                         proba_labels=list(model.classes_))
 
     # Cross-domain
     yhat_pt = model.predict(X_pt)
     proba_pt = model.predict_proba(X_pt)
-    cd = score_block(y_ptbxl_4c, yhat_pt, proba_pt, rng=rng)
+    cd = score_block(y_ptbxl_4c, yhat_pt, proba_pt, rng=rng,
+                     proba_labels=list(model.classes_))
 
     return {
         "best_C": best_C,
@@ -534,7 +602,7 @@ def main() -> int:
     print(f"[load] PTB-XL primary 4c subset: n={ptbxl_idx.size}; "
           f"counts={dict(pd.Series(ptbxl_truth).value_counts())}")
 
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(SEED)  # fallback; rebound per (K, condition) below (m10)
     summary: Dict[str, Dict] = {}
     if args.out.exists():
         try:
@@ -552,7 +620,7 @@ def main() -> int:
                     K, suffix="", targets=targets,
                     ptbxl_primary_idx=ptbxl_idx,
                     ptbxl_primary_truth=ptbxl_truth,
-                    rng=rng,
+                    rng=derive_rng("eval_decoding_lowK", K, "orig", seed=SEED),
                 )
             except FileNotFoundError as exc:
                 print(f"[skip] orig K={K}: {exc}")
@@ -561,7 +629,7 @@ def main() -> int:
                 K, suffix="_inlp", targets=targets,
                 ptbxl_primary_idx=ptbxl_idx,
                 ptbxl_primary_truth=ptbxl_truth,
-                rng=rng,
+                rng=derive_rng("eval_decoding_lowK", K, "inlp", seed=SEED),
             )
         except FileNotFoundError as exc:
             print(f"[skip] inlp K={K}: {exc}")

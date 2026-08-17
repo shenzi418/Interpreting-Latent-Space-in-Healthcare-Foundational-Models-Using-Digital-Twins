@@ -31,6 +31,7 @@ from finetune_model import (  # pylint: disable=wrong-import-position
 )
 from metrics import AVAILABLE_METRICS, compute_multilabel_metrics  # pylint: disable=wrong-import-position
 from losses.mmd import mmd_rbf  # pylint: disable=wrong-import-position
+from scripts.medalcare_paths import assert_label_schema  # pylint: disable=wrong-import-position
 from util import save_checkpoint  # pylint: disable=wrong-import-position
 
 DEFAULT_MANIFEST = REPO_ROOT / "data" / "medalcare_filtered_manifest_dataset_split.csv"
@@ -131,6 +132,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional identifier for outputs/<run_id>. Defaults to timestamp.",
     )
     parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Allow reusing a --run-id whose outputs/<run_id>/metrics.json already "
+             "exists. Without this, a completed run is never overwritten in place.",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=5,
@@ -180,7 +187,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ignore-splits",
         action="store_true",
-        help="Ignore manifest splits and create random train/val/test partitions.",
+        help="DEPRECATED -- do not use for any reported result. Discards the "
+             "canonical manifest 'split' column and re-partitions at random "
+             "(see prepare_splits). Every theta_mi_*.npz and latents.npz in this "
+             "repo assumes the canonical row order, so a run trained this way "
+             "cannot be analysed by anything downstream. Kept only so old "
+             "invocations still parse.",
     )
     parser.add_argument(
         "--eval-on-train",
@@ -339,6 +351,20 @@ def parse_args() -> argparse.Namespace:
              "for both MedalCare and PTB-XL. Requires both datasets.",
     )
     parser.add_argument(
+        "--medalcare-only",
+        action="store_true",
+        help="Shared-head training on MedalCare ONLY: no PTB-XL gradient step, and "
+             "model selection on MedalCare val alone. The encoder then never sees a "
+             "real ECG, so ALL TEN PTB-XL folds are held out and usable for "
+             "evaluation instead of just fold 10 (n=438 -> ~4400 on the 4-class "
+             "territory endpoint). Everything else -- architecture, 3-class shared "
+             "label space, adapters, LRs, schedule -- is identical to --shared-head, "
+             "so the pair isolates PTB-XL exposure as the single changed variable. "
+             "PTB-XL val/test are still SCORED each epoch, but only as a passive "
+             "readout; they never enter val_score, the scheduler, or checkpoint "
+             "selection. Requires --shared-head; incompatible with --lambda-mmd.",
+    )
+    parser.add_argument(
         "--dual-head-shared-labels",
         action="store_true",
         help="Pre-Phase-B redo (supervisor 2026-04-29): joint dual-head training "
@@ -352,7 +378,67 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use class-conditional MMD instead of class-agnostic MMD (Exp 7-ccmmd).",
     )
+    parser.add_argument(
+        "--global-z",
+        action="store_true",
+        help="Normalisation ablation (fix N, 2026-08-10): normalise MedalCare with a "
+             "single GLOBAL scalar mean/std over the whole (12, T) array instead of the "
+             "per-lead z-score that PTB-XL uses. Off by default -- per-lead is now the "
+             "convention on both sides. Use this only to reproduce the legacy "
+             "mismatched-normalisation arm (exp8_leadfix_globalz).",
+    )
     return parser.parse_args()
+
+
+def resolve_run_dir(
+    run_id: Optional[str],
+    allow_overwrite: bool,
+    base: Optional[Path] = None,
+) -> Tuple[str, Path]:
+    """Resolve `outputs/<run_id>/`, refusing to silently overwrite a finished run.
+
+    Stage-5 hygiene (2026-08-10 audit). Re-running with an existing `--run-id`
+    used to overwrite `metrics.json` and `checkpoints/` in place, so a run could
+    be quietly replaced by a differently-configured one carrying the same name --
+    and with no `args.json` written, nothing recorded which was which. A run is
+    "finished" iff it has a `metrics.json`; partially-written directories (killed
+    mid-training) are still resumed into, since that is the useful behaviour.
+    """
+    run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    outputs_dir = ((base or DEFAULT_OUTPUTS) / run_id).resolve()
+    if (outputs_dir / "metrics.json").exists() and not allow_overwrite:
+        raise SystemExit(
+            f"run_id {run_id!r} already has a completed run at "
+            f"{outputs_dir} (metrics.json exists).\n"
+            f"Pass --overwrite to replace it, or choose a new --run-id. "
+            f"Overwriting in place destroys the only record of the previous run."
+        )
+    return run_id, outputs_dir
+
+
+def save_run_args(outputs_dir: Path, args: argparse.Namespace, extra: Optional[Dict] = None) -> None:
+    """Write `outputs/<run_id>/args.json` -- the documented artifact contract.
+
+    Stage-5 hygiene (2026-08-10 audit): the contract in `.claude/rules/experiments.md`
+    has always listed args.json, but no code path wrote it, so every existing run's
+    exact invocation is unrecoverable. Paths are stringified; anything non-JSONable
+    falls back to repr() rather than aborting a training run over provenance.
+    """
+    payload: Dict[str, object] = {}
+    for key, value in vars(args).items():
+        if isinstance(value, Path):
+            payload[key] = str(value)
+        else:
+            try:
+                json.dumps(value)
+                payload[key] = value
+            except (TypeError, ValueError):
+                payload[key] = repr(value)
+    payload["_argv"] = sys.argv
+    payload["_written_at"] = datetime.now().isoformat(timespec="seconds")
+    if extra:
+        payload.update(extra)
+    (outputs_dir / "args.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def set_deterministic(seed: int) -> None:
@@ -389,6 +475,10 @@ def ensure_manifest(path: Path) -> pd.DataFrame:
     label_columns = [col for col in df.columns if col.startswith("label_")]
     if not label_columns:
         raise ValueError("Manifest must contain columns named label_0 ... label_n for multi-label targets.")
+    # MEDALCARE_REMAP / MEDALCARE_KEEP_LABELS / MEDALCARE_DROP_LABELS index by
+    # integer position, so a renamed or reordered column silently relabels every
+    # sample with no error anywhere downstream. Fail here instead.
+    assert_label_schema(df.columns)
     return df
 
 
@@ -396,6 +486,23 @@ def prepare_splits(
     df: pd.DataFrame,
     ignore_splits: bool,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Partition the MedalCare manifest into train/val/test.
+
+    TWO SPLIT SYSTEMS exist in this repo; only the first is canonical.
+
+      1. **Manifest `split` column** (canonical). Written by
+         `scripts/make_splits.py`, seeded from SHA-256 of `original_csv_path`,
+         attached by `scripts/add_medalcare_splits.py`. Every artifact under
+         `data/theta_mi_*.npz` and `outputs/latents/*/latents.npz` is indexed by
+         position within these splits.
+      2. **The `--ignore-splits` fallback below** (deprecated). A `train_test_split`
+         on shuffled rows. Reproducible in itself (`random_state=42`) but it does
+         NOT reproduce system 1, so a run trained under it silently invalidates
+         every downstream analysis, which has no way to detect the mismatch.
+
+    Nothing in `reports/` was produced with system 2. It is retained only so old
+    command lines still parse; it emits a loud warning when it fires.
+    """
     if not ignore_splits and "split" in df.columns:
         split_counts = df["split"].value_counts()
         required = {"train", "val", "test"}
@@ -405,6 +512,12 @@ def prepare_splits(
             test_df = df[df["split"] == "test"].reset_index(drop=True)
             return train_df, val_df, test_df
 
+    print(
+        "[WARN] Falling back to the DEPRECATED random split "
+        f"(ignore_splits={ignore_splits}, has 'split' column={'split' in df.columns}). "
+        "Row order will not match data/theta_mi_*.npz or any exported latents; "
+        "downstream analysis of this run will be silently misaligned."
+    )
     # Fallback: deterministic random split
     from sklearn.model_selection import train_test_split
 
@@ -447,6 +560,7 @@ def make_dataloader(
     include_theta: bool = False,
     theta_config: Optional[Path] = None,
     theta_stats: Optional[Path] = None,
+    per_lead_norm: bool = True,
 ) -> DataLoader:
     labels_df = df.reset_index(drop=True)
     if include_domain and domain_map is None:
@@ -460,6 +574,7 @@ def make_dataloader(
         include_theta=include_theta,
         theta_config=theta_config,
         theta_stats=theta_stats,
+        per_lead_norm=per_lead_norm,
     )
     return DataLoader(
         dataset,
@@ -660,8 +775,18 @@ def _filter_medalcare_manifest(df: pd.DataFrame) -> pd.DataFrame:
 
 def _filter_ptbxl_dataset(dataset: PTBXLDataset) -> PTBXLDataset:
     """Drop PTB-XL samples whose only positive superclass labels are STTC/HYP."""
-    targets = dataset.targets  # (N, 5)
-    keep_indices = [idx for src, idx in PTBXL_REMAP.items()]  # columns 0, 1, 4
+    targets = dataset.targets  # (N, 5) = NORM, MI, STTC, HYP, CD
+    # FIXED 2026-08-10. This was:
+    #     keep_indices = [idx for src, idx in PTBXL_REMAP.items()]  # columns 0, 1, 4
+    # which iterates the VALUES of PTBXL_REMAP ({0:0, 1:1, 4:2}) and therefore
+    # yields [0, 1, 2] = NORM, MI, STTC — contradicting its own inline comment.
+    # It kept STTC and DROPPED CD, the very class the shared 3-class label space
+    # is built around: ~42% of CD rows were discarded from train/val/test while
+    # ~315 STTC/HYP-only rows were retained with all-zero shared targets. Every
+    # PTB-XL metric from exp7_baseline / exp7_ccmmd / exp7_bottleneck_K* was
+    # measured against that corrupted set.
+    # The SOURCE columns are the keys; the values are destination indices.
+    keep_indices = list(PTBXL_REMAP.keys())  # columns 0 (NORM), 1 (MI), 4 (CD)
     keep_mask = np.any(targets[:, keep_indices] > 0, axis=1)
     n_before = len(dataset.records)
     dataset.records = dataset.records[keep_mask].reset_index(drop=True)
@@ -682,9 +807,12 @@ def build_shared_head_loaders(
     val_df = _filter_medalcare_manifest(val_df)
     test_df = _filter_medalcare_manifest(test_df)
 
-    medal_train = make_dataloader(train_df, args.batch_size, args.num_workers, shuffle=True)
-    medal_val = make_dataloader(val_df, args.batch_size, args.num_workers, shuffle=False)
-    medal_test = make_dataloader(test_df, args.batch_size, args.num_workers, shuffle=False)
+    medal_train = make_dataloader(train_df, args.batch_size, args.num_workers, shuffle=True,
+                                  per_lead_norm=not getattr(args, "global_z", False))
+    medal_val = make_dataloader(val_df, args.batch_size, args.num_workers, shuffle=False,
+                                per_lead_norm=not getattr(args, "global_z", False))
+    medal_test = make_dataloader(test_df, args.batch_size, args.num_workers, shuffle=False,
+                                 per_lead_norm=not getattr(args, "global_z", False))
 
     label_cols_8 = [col for col in train_df.columns if col.startswith("label_")]
     medal_pos_8 = train_df[label_cols_8].sum(axis=0).to_numpy()
@@ -720,18 +848,35 @@ def build_shared_head_loaders(
         ptb_pos_shared[tgt_idx] += ptb_train_ds.targets[:, src_idx].sum()
 
     # --- Combined pos_weight ---
-    combined_pos = medal_pos_shared + ptb_pos_shared
-    combined_total = medal_train_n + ptb_train_n
+    if getattr(args, "medalcare_only", False):
+        # No PTB-XL gradient step, so PTB-XL must not contribute to the class
+        # balance either -- otherwise the loss is reweighted for a training
+        # distribution that never occurs. `ptb["train"]` is set to None below so
+        # that any code path still trying to train on it fails loudly instead of
+        # silently reintroducing the exposure this mode exists to remove.
+        combined_pos = medal_pos_shared
+        combined_total = medal_train_n
+    else:
+        combined_pos = medal_pos_shared + ptb_pos_shared
+        combined_total = medal_train_n + ptb_train_n
     combined_neg = combined_total - combined_pos
     pos_weight_arr = combined_neg / np.clip(combined_pos, 1e-6, None)
 
-    print(f"[shared-head] Combined train: MedalCare {medal_train_n} + PTB-XL {ptb_train_n} = {combined_total}")
+    if getattr(args, "medalcare_only", False):
+        print(f"[shared-head] MEDALCARE-ONLY: train = MedalCare {medal_train_n} "
+              f"(PTB-XL train fold withheld; {ptb_train_n} rows unused)")
+    else:
+        print(f"[shared-head] Combined train: MedalCare {medal_train_n} + PTB-XL {ptb_train_n} = {combined_total}")
     for i, name in enumerate(SHARED_LABELS):
         print(f"  {name}: pos={combined_pos[i]:.0f}, neg={combined_neg[i]:.0f}, weight={pos_weight_arr[i]:.3f}")
 
     return {
         "medal": {"train": medal_train, "val": medal_val, "test": medal_test},
-        "ptb": {"train": ptb_train, "val": ptb_val, "test": ptb_test},
+        "ptb": {
+            "train": None if getattr(args, "medalcare_only", False) else ptb_train,
+            "val": ptb_val,
+            "test": ptb_test,
+        },
         "pos_weight": pos_weight_arr,
         "medal_train_n": medal_train_n,
         "ptb_train_n": ptb_train_n,
@@ -1192,15 +1337,14 @@ def _run_shared_head(args: argparse.Namespace) -> None:
     """Exp 7: Shared-head joint training on 3 overlapping classes (NORM, MI, CD)."""
     set_deterministic(args.seed)
     metrics_to_compute = validate_metrics(args.metrics.split(","))
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    outputs_dir = (DEFAULT_OUTPUTS / run_id).resolve()
+    run_id, outputs_dir = resolve_run_dir(args.run_id, args.overwrite)
     checkpoints_dir = outputs_dir / "checkpoints"
     tensors_dir = outputs_dir / "tensors"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     if args.log_tensors:
         tensors_dir.mkdir(parents=True, exist_ok=True)
+    save_run_args(outputs_dir, args)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -1264,7 +1408,8 @@ def _run_shared_head(args: argparse.Namespace) -> None:
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
         model.train()
-        steps = min(len(medal_train), len(ptb_train))
+        medal_only = getattr(args, "medalcare_only", False)
+        steps = len(medal_train) if medal_only else min(len(medal_train), len(ptb_train))
         running_loss_medal = 0.0
         running_loss_ptb = 0.0
         samples_medal = 0
@@ -1272,46 +1417,53 @@ def _run_shared_head(args: argparse.Namespace) -> None:
         running_mmd = 0.0
         mmd_batches = 0
 
+        # In medalcare-only mode there is no second stream to zip against, so
+        # every MedalCare batch is used (zip would otherwise truncate to the
+        # shorter loader) and the PTB-XL half of the step is skipped entirely.
+        batch_iter = (
+            ((b, None) for b in medal_train) if medal_only
+            else zip(medal_train, ptb_train)
+        )
         for batch_medal, batch_ptb in tqdm(
-            zip(medal_train, ptb_train), total=steps, desc="Training", leave=False
+            batch_iter, total=steps, desc="Training", leave=False
         ):
             medal_inputs, medal_labels_8 = batch_medal[0], batch_medal[1]
-            ptb_inputs, ptb_labels_5 = batch_ptb[0], batch_ptb[1]
-
             medal_inputs = medal_inputs.to(device, non_blocking=True)
-            ptb_inputs = ptb_inputs.to(device, non_blocking=True)
             medal_labels_8 = medal_labels_8.to(device, non_blocking=True)
-            ptb_labels_5 = ptb_labels_5.to(device, non_blocking=True)
-
             medal_labels = remap_labels(medal_labels_8, MEDALCARE_REMAP, N_SHARED, device)
-            ptb_labels = remap_labels(ptb_labels_5, PTBXL_REMAP, N_SHARED, device)
-
             if args.label_smoothing > 0.0:
                 medal_labels = medal_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
-                ptb_labels = ptb_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
 
             optimizer.zero_grad()
-
             logits_medal = model(medal_inputs)
             feat_medal = model.last_features
-            logits_ptb = model(ptb_inputs)
-            feat_ptb = model.last_features
-
             loss_medal = criterion(logits_medal, medal_labels)
-            loss_ptb = criterion(logits_ptb, ptb_labels)
-            loss = loss_medal + loss_ptb
+            loss = loss_medal
 
-            if args.lambda_mmd > 0.0 and feat_medal.size(0) > 1 and feat_ptb.size(0) > 1:
-                if args.class_cond_mmd:
-                    from losses.mmd import mmd_rbf_class_conditional
-                    mmd_value = mmd_rbf_class_conditional(
-                        feat_medal, feat_ptb, medal_labels, ptb_labels
-                    )
-                else:
-                    mmd_value = mmd_rbf(feat_medal, feat_ptb)
-                loss = loss + args.lambda_mmd * mmd_value
-                running_mmd += mmd_value.item()
-                mmd_batches += 1
+            if not medal_only:
+                ptb_inputs, ptb_labels_5 = batch_ptb[0], batch_ptb[1]
+                ptb_inputs = ptb_inputs.to(device, non_blocking=True)
+                ptb_labels_5 = ptb_labels_5.to(device, non_blocking=True)
+                ptb_labels = remap_labels(ptb_labels_5, PTBXL_REMAP, N_SHARED, device)
+                if args.label_smoothing > 0.0:
+                    ptb_labels = ptb_labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
+
+                logits_ptb = model(ptb_inputs)
+                feat_ptb = model.last_features
+                loss_ptb = criterion(logits_ptb, ptb_labels)
+                loss = loss_medal + loss_ptb
+
+                if args.lambda_mmd > 0.0 and feat_medal.size(0) > 1 and feat_ptb.size(0) > 1:
+                    if args.class_cond_mmd:
+                        from losses.mmd import mmd_rbf_class_conditional
+                        mmd_value = mmd_rbf_class_conditional(
+                            feat_medal, feat_ptb, medal_labels, ptb_labels
+                        )
+                    else:
+                        mmd_value = mmd_rbf(feat_medal, feat_ptb)
+                    loss = loss + args.lambda_mmd * mmd_value
+                    running_mmd += mmd_value.item()
+                    mmd_batches += 1
 
             loss.backward()
             if args.grad_clip and args.grad_clip > 0:
@@ -1319,16 +1471,20 @@ def _run_shared_head(args: argparse.Namespace) -> None:
             optimizer.step()
 
             b_m = medal_inputs.size(0)
-            b_p = ptb_inputs.size(0)
             running_loss_medal += loss_medal.item() * b_m
-            running_loss_ptb += loss_ptb.item() * b_p
             samples_medal += b_m
-            samples_ptb += b_p
+            if not medal_only:
+                b_p = ptb_inputs.size(0)
+                running_loss_ptb += loss_ptb.item() * b_p
+                samples_ptb += b_p
 
         avg_loss_medal = running_loss_medal / max(samples_medal, 1)
         avg_loss_ptb = running_loss_ptb / max(samples_ptb, 1)
         avg_mmd = running_mmd / mmd_batches if mmd_batches > 0 else None
-        print(f"Training loss -> MedalCare: {avg_loss_medal:.6f}, PTB-XL: {avg_loss_ptb:.6f}")
+        if medal_only:
+            print(f"Training loss -> MedalCare: {avg_loss_medal:.6f} (PTB-XL: not trained)")
+        else:
+            print(f"Training loss -> MedalCare: {avg_loss_medal:.6f}, PTB-XL: {avg_loss_ptb:.6f}")
         if avg_mmd is not None:
             print(f"Average MMD: {avg_mmd:.6f}")
 
@@ -1356,8 +1512,16 @@ def _run_shared_head(args: argparse.Namespace) -> None:
         _, ptb_f1 = select_primary_metric(val_ptb, metrics_to_compute)
         medal_f1 = medal_f1 if medal_f1 is not None else 0.0
         ptb_f1 = ptb_f1 if ptb_f1 is not None else 0.0
-        val_score = (medal_f1 + ptb_f1) / 2.0
-        print(f"Checkpoint metric (avg domain F1): {val_score:.4f}")
+        if medal_only:
+            # PTB-XL val is scored above purely as a readout. Letting it into the
+            # checkpoint metric would select the encoder using real-ECG labels and
+            # silently recontaminate fold 9, which is the whole point of this mode.
+            val_score = medal_f1
+            print(f"Checkpoint metric (MedalCare val F1 only): {val_score:.4f}  "
+                  f"[PTB-XL val F1 {ptb_f1:.4f} = passive readout, not selected on]")
+        else:
+            val_score = (medal_f1 + ptb_f1) / 2.0
+            print(f"Checkpoint metric (avg domain F1): {val_score:.4f}")
 
         scheduler.step(val_score if np.isfinite(val_score) else 0.0)
 
@@ -1503,15 +1667,14 @@ def _run_dual_head_shared_labels(args: argparse.Namespace) -> None:
     """
     set_deterministic(args.seed)
     metrics_to_compute = validate_metrics(args.metrics.split(","))
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    outputs_dir = (DEFAULT_OUTPUTS / run_id).resolve()
+    run_id, outputs_dir = resolve_run_dir(args.run_id, args.overwrite)
     checkpoints_dir = outputs_dir / "checkpoints"
     tensors_dir = outputs_dir / "tensors"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     if args.log_tensors:
         tensors_dir.mkdir(parents=True, exist_ok=True)
+    save_run_args(outputs_dir, args)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -1825,9 +1988,21 @@ def main() -> None:
     args.freeze_encoder = args.freeze_encoder or getattr(args, "linear_probe", False)
     set_deterministic(args.seed)
     metrics_to_compute = validate_metrics(args.metrics.split(","))
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-
     # --- Exp 7: shared-head branch (completely separate code path) ---
+    if getattr(args, "medalcare_only", False):
+        if not args.shared_head:
+            raise SystemExit(
+                "--medalcare-only only applies to the shared-head code path; pass "
+                "--shared-head as well. (For plain single-domain training just use "
+                "--dataset medalcare with no --shared-head, but note that changes "
+                "the label space too, so it is not a controlled comparison.)"
+            )
+        if args.lambda_mmd > 0.0:
+            raise SystemExit(
+                "--medalcare-only is incompatible with --lambda-mmd: MMD is a "
+                "distance between the MedalCare and PTB-XL feature batches, and "
+                "there is no PTB-XL batch in this mode."
+            )
     if args.shared_head:
         _run_shared_head(args)
         return
@@ -1849,13 +2024,14 @@ def main() -> None:
     outputs_base = (
         PTBXL_OUTPUT_ROOT / args.head_type if args.dataset == "ptbxl" else DEFAULT_OUTPUTS
     )
-    outputs_dir = (outputs_base / run_id).resolve()
+    run_id, outputs_dir = resolve_run_dir(args.run_id, args.overwrite, base=outputs_base)
     checkpoints_dir = outputs_dir / "checkpoints"
     tensors_dir = outputs_dir / "tensors"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     if args.log_tensors:
         tensors_dir.mkdir(parents=True, exist_ok=True)
+    save_run_args(outputs_dir, args)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")

@@ -48,9 +48,9 @@
     },
     "territory_4c_counts": {
       "Anteroseptal": 1799,
-      "Anterolateral": 850,
+      "Anterolateral": 1300,
       "Inferior": 1798,
-      "Inferolateral": 900
+      "Inferolateral": 450
     },
     "territory_8c_counts": {
       "LAD_0.3": 899,
@@ -112,9 +112,9 @@
     },
     "territory_4c_counts": {
       "Anteroseptal": 400,
-      "Anterolateral": 250,
+      "Anterolateral": 350,
       "Inferior": 400,
-      "Inferolateral": 200
+      "Inferolateral": 100
     },
     "territory_8c_counts": {
       "LAD_0.3": 200,
@@ -176,9 +176,9 @@
     },
     "territory_4c_counts": {
       "Anteroseptal": 400,
-      "Anterolateral": 200,
+      "Anterolateral": 300,
       "Inferior": 400,
-      "Inferolateral": 200
+      "Inferolateral": 100
     },
     "territory_8c_counts": {
       "LAD_0.3": 200,

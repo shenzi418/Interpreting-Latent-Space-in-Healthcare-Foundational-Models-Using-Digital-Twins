@@ -218,13 +218,15 @@ def run_eval(seed: int = 42, med_train: str = "exp7_medalcare_train",
     res = {"med_train": med_train, "med_test": med_test,
            "best_C": best_C, "cv_scores": cv_scores,
            "in_domain": score_block(yte, model.predict(Xte_s),
-                                    model.predict_proba(Xte_s), rng=rng)}
+                                    model.predict_proba(Xte_s), rng=rng,
+                                    proba_labels=list(model.classes_))}
     print(f"  in-domain MedalCare macro-F1 {res['in_domain']['macro_f1']:.4f}")
 
     for tag, Zp in [("ptbxl_orig", Z_ptb_orig), ("ptbxl_leadswap", Z_ptb_swap)]:
         Xp = scaler.transform(Zp[p_idx])
         yhat = model.predict(Xp)
-        res[tag] = score_block(p_y, yhat, model.predict_proba(Xp), rng=rng)
+        res[tag] = score_block(p_y, yhat, model.predict_proba(Xp), rng=rng,
+                               proba_labels=list(model.classes_))
         b = res[tag]
         cm = np.asarray(b["confusion_matrix"])
         auc = b["macro_auc_ovr"]

@@ -18,7 +18,8 @@ For each configuration ``c in {exp5_3class, exp6_3class, exp7_baseline,
 exp7_ccmmd}`` and each input source ``s in {Z, ecg_features}``, the script
 fits a tiny linear probe (~1024 weights / target), evaluates on test, runs
 1000-resample bootstrap CIs and (for the Ridge probes) 1000 permutation
-tests via the closed-form ``y_test_pred = K @ y_train`` trick.
+tests via the closed-form intercept-aware hat-matrix trick
+``y_test_pred = K @ (y_train - ybar) + ybar`` (see ``_ridge_K_matrix``).
 
 Outputs:
 
@@ -33,6 +34,7 @@ Run::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import warnings
@@ -59,7 +61,7 @@ from sklearn.metrics import (  # noqa: E402
     confusion_matrix,
     balanced_accuracy_score,
 )
-from sklearn.model_selection import StratifiedKFold  # noqa: E402
+from sklearn.model_selection import StratifiedKFold, KFold  # noqa: E402
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -81,6 +83,19 @@ CONFIG_LATENT_STEMS: Dict[str, str] = {
     "exp6_3class":   "exp6_3class",
     "exp7_baseline": "exp7",          # exp7_medalcare_train / exp7_medalcare
     "exp7_ccmmd":    "exp7_ccmmd",    # exp7_ccmmd_medalcare_train / exp7_ccmmd_medalcare
+    # Stage 3 (2026-08-10 audit) retrains under the lead-order + PTB-XL-filter
+    # fixes. These export as `{stem}_{domain}_test` rather than the older bare
+    # `{stem}_{domain}`; _resolve_latent_dir accepts either.
+    "exp8_leadfix_baseline": "exp8_leadfix_baseline",
+    "exp8_leadfix_ccmmd":    "exp8_leadfix_ccmmd",
+    "exp8_leadfix_dual":     "exp8_leadfix_dual",
+    "exp8_leadfix_globalz":  "exp8_leadfix_globalz",
+    "exp8_leadfix_K64":      "exp8_leadfix_K64",
+    # 2026-08-11: shared-head trained on MedalCare ONLY (`--medalcare-only`), so
+    # no PTB-XL fold was ever seen. Its cross-domain arm may therefore use all
+    # ten folds instead of fold 10 alone -- pass the matching
+    # --ptbxl-subclass-csv / --ptbxl-features / latent export.
+    "exp8_leadfix_medalonly": "exp8_leadfix_medalonly",
 }
 
 THETA_TRAIN_PATH = REPO_ROOT / "data" / "theta_mi_train.npz"
@@ -91,6 +106,13 @@ FEAT_TEST_PATH = REPO_ROOT / "data" / "ecg_features_medalcare_test.npz"
 # Cross-domain (B2-CD) — PTB-XL inputs
 LATENT_PTBXL_TEMPLATE = "outputs/latents/{stem}_ptbxl/latents.npz"
 PTBXL_SUBCLASS_PATH = REPO_ROOT / "data" / "ptbxl_mi_subclass.csv"
+# Row count of whatever subclass CSV is in force, set once main() has read it.
+# `load_ptbxl_latents` checks every export against it; None disables the check
+# for callers that import this module without going through main().
+_PTBXL_EXPECTED_ROWS: Optional[int] = None
+# Same, element-wise: the subclass CSV's ecg_id column, checked against the
+# `ecg_id` key that exports written after 2026-08-11 carry.
+_PTBXL_EXPECTED_IDS: Optional[np.ndarray] = None
 FEAT_PTBXL_PATH = REPO_ROOT / "data" / "ecg_features_ptbxl_test.npz"
 
 # Empirical phi-bin boundaries audited in §3 (theta_mi_build_summary.json):
@@ -158,8 +180,102 @@ CONFIGS = ["exp5_3class", "exp6_3class", "exp7_baseline", "exp7_ccmmd"]
 SOURCES = ["Z", "ecg_features"]
 N_BOOT = 1000
 N_PERM = 1000          # for Ridge (closed-form, fast)
-N_PERM_BINARY = 200    # for LogisticRegression (refits required)
+# A5 fix: was 200, giving a p-value floor of 1/201 = 0.00498. After Holm
+# correction across the primary endpoint set that floor cannot reach alpha=0.05
+# for the later-ranked endpoints, so a real effect could be un-rejectable purely
+# from the permutation budget. 10000 gives a floor of 9.999e-5.
+N_PERM_BINARY = 10000  # for LogisticRegression (refits required)
 SEED = 42
+
+# ---------------------------------------------------------------------------
+# A5: pre-registered primary endpoints + Holm-Bonferroni
+# ---------------------------------------------------------------------------
+# The script computes on the order of 100 p-values across configs x sources x
+# targets. Reporting "p < 0.05" against that many tests is uninterpretable. The
+# endpoints below are the ones the thesis actually makes a claim about; they are
+# fixed HERE, before the numbers are looked at, and Holm-corrected as a family.
+# Everything else the script emits is explicitly exploratory and must be
+# described that way.
+#
+# Paths are resolved against the MERGED tree ``{**results, "pipeline_a": ...}``
+# built in main(); the Pipeline-A leg therefore needs its source key ("Z") in
+# the path, exactly as it is stored (`pipeline_a_results[cfg] = {"Z": ...}`).
+# Target names must match the theta member names emitted by load_targets --
+# "rho_eps_max", not the prose alias "transmurality" (theta has 4 members; see
+# m2 in the audit log).
+PRIMARY_ENDPOINTS: Tuple[Tuple[str, str], ...] = (
+    # (json path within the merged results tree, human-readable claim)
+    ("exp7_baseline/Z/phi/permutation_p_circular_r2",
+     "in-domain phi is linearly decodable from the 1024-d latent"),
+    ("exp7_baseline/Z/z/permutation_p_r2",
+     "in-domain z is linearly decodable"),
+    ("exp7_baseline/Z/size/permutation_p_r2",
+     "in-domain size is linearly decodable"),
+    ("exp7_baseline/Z/rho_eps_max/permutation_p_auc",
+     "in-domain transmurality (rho_eps_max) is linearly decodable"),
+    ("pipeline_a/exp7_baseline/Z/cross_domain_4c/permutation_p_macro_f1",
+     "cross-domain 4-class territory transfer beats chance (Pipeline A)"),
+)
+
+
+def derive_rng(*parts: object, seed: int = SEED) -> np.random.Generator:
+    """Deterministic RNG stream keyed by ``seed`` plus arbitrary labels.
+
+    m10 fix (shared by phase_b2, dim_scan, eval_decoding_lowK, concept5). A
+    single ``rng`` used to be threaded through every unit of report in a loop,
+    so the bootstrap/permutation draws a given cell received depended on how
+    many cells preceded it -- i.e. on the CLI flags. Running
+    ``--configs exp7_baseline`` and ``--configs exp5_3class,exp7_baseline``
+    produced different CIs and p-values for exp7_baseline. Keying the stream on
+    the identity of the cell makes each cell's numbers reproducible on their
+    own, independent of what else was requested in the same invocation.
+
+    Uses SHA-256 rather than ``hash()`` because Python's string hash is salted
+    per process, which would make runs non-reproducible across invocations.
+    """
+    key = "|".join(str(p) for p in parts).encode("utf-8")
+    h = hashlib.sha256(key).digest()[:8]
+    return np.random.default_rng([seed, int.from_bytes(h, "big")])
+
+
+def config_rng(config: str, seed: int = SEED) -> np.random.Generator:
+    """Per-config RNG stream. See :func:`derive_rng`."""
+    return derive_rng(config, seed=seed)
+
+
+def holm_bonferroni(
+    pvals: Dict[str, float],
+    alpha: float = 0.05,
+    m_family: Optional[int] = None,
+) -> Dict[str, Dict]:
+    """Holm-Bonferroni step-down correction over a pre-registered family.
+
+    Returns ``{name: {p_raw, p_adjusted, rank, reject}}``. Adjusted p-values are
+    made monotone non-decreasing in rank, which is what makes them comparable to
+    a single alpha.
+
+    ``m_family`` sets the family size used in the correction. Pass the size of
+    the PRE-REGISTERED family, not the number of endpoints that happened to be
+    computed in this run: letting m shrink because an endpoint was skipped makes
+    the correction anti-conservative, which is exactly the multiplicity problem
+    the correction exists to control.
+    """
+    items = sorted(pvals.items(), key=lambda kv: kv[1])
+    m = len(items) if m_family is None else int(m_family)
+    out: Dict[str, Dict] = {}
+    running = 0.0
+    for i, (name, p) in enumerate(items):
+        p_adj = min(1.0, (m - i) * p)
+        running = max(running, p_adj)  # enforce monotonicity
+        out[name] = {
+            "p_raw": float(p),
+            "p_adjusted": float(running),
+            "rank": i + 1,
+            "n_in_family": m,
+            "n_computed": len(items),
+            "reject_at_alpha": bool(running <= alpha),
+        }
+    return out
 
 # RidgeCV / LogisticRegression hyperparam grids.
 # Ridge α extended to 1e6 because the original 1e-3..1e3 grid saturated at the
@@ -182,6 +298,26 @@ def load_targets() -> Dict[str, Dict[str, np.ndarray]]:
         f"[targets] train MI={train['idx_in_split'].size}, "
         f"test MI={test['idx_in_split'].size}"
     )
+    # m2 fix: `rho_eps_max` and `transmural` are the identical array. They have
+    # been reported in places as two separate theta parameters, making theta
+    # look 5-dimensional; it is 4-dimensional (phi, z, size, rho_eps_max) with
+    # `transmural` an alias. Assert the identity so that if a future rebuild
+    # makes them genuinely distinct this fails loudly instead of silently
+    # invalidating the "4 parameters" claim in the writeup.
+    for split_name, d in (("train", train), ("test", test)):
+        if "transmural" in d and "rho_eps_max" in d:
+            same = np.array_equal(
+                np.asarray(d["rho_eps_max"], dtype=np.float64),
+                np.asarray(d["transmural"], dtype=np.float64),
+            )
+            if not same:
+                raise RuntimeError(
+                    f"[m2] theta_mi_{split_name}.npz: 'rho_eps_max' and "
+                    "'transmural' are no longer identical. Every report in "
+                    "reports/ describing theta as 4-dimensional with "
+                    "transmural as an alias must be revisited."
+                )
+    print("[targets] m2 check: rho_eps_max == transmural (theta has 4 members, not 5)")
     return {"train": train, "test": test}
 
 
@@ -201,6 +337,29 @@ def load_features() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Lis
     return feat_train, feat_test, nk2_ok_train, nk2_ok_test, feature_names
 
 
+def _resolve_latent_dir(stem: str, domain: str, split: str, suffix: str) -> Path:
+    """Locate a latent export dir, tolerating both naming conventions.
+
+    Historical exports name the TEST split with no split token at all
+    (`exp7_medalcare`), while train/val carry one (`exp7_medalcare_train`).
+    Stage-3 `exp8_leadfix_*` exports are uniform (`..._medalcare_test`). Try the
+    explicit form first, fall back to the bare form, and raise with BOTH paths
+    listed rather than a bare FileNotFoundError on whichever was tried last.
+    """
+    base = REPO_ROOT / "outputs" / "latents"
+    candidates = [base / f"{stem}_{domain}_{split}{suffix}"]
+    if split == "test":
+        candidates.append(base / f"{stem}_{domain}{suffix}")
+    for cand in candidates:
+        if (cand / "latents.npz").exists():
+            return cand / "latents.npz"
+    tried = "\n  ".join(str(c / "latents.npz") for c in candidates)
+    raise FileNotFoundError(
+        f"No latent export for stem='{stem}' domain='{domain}' split='{split}' "
+        f"suffix='{suffix}'. Tried:\n  {tried}"
+    )
+
+
 def load_config_latents(config: str, *, suffix: str = "") -> Tuple[np.ndarray, np.ndarray]:
     """Load Z_train_full and Z_test_full for one config.
 
@@ -211,10 +370,8 @@ def load_config_latents(config: str, *, suffix: str = "") -> Tuple[np.ndarray, n
              empty preserves byte-identical pre-INLP behaviour.
     """
     stem = CONFIG_LATENT_STEMS[config]
-    train_dir = f"{stem}_medalcare_train{suffix}"
-    test_dir = f"{stem}_medalcare{suffix}"
-    train_path = REPO_ROOT / "outputs" / "latents" / train_dir / "latents.npz"
-    test_path = REPO_ROOT / "outputs" / "latents" / test_dir / "latents.npz"
+    train_path = _resolve_latent_dir(stem, "medalcare", "train", suffix)
+    test_path = _resolve_latent_dir(stem, "medalcare", "test", suffix)
     Z_train = np.load(train_path, allow_pickle=True)["Z"].astype(np.float64)
     Z_test = np.load(test_path, allow_pickle=True)["Z"].astype(np.float64)
     return Z_train, Z_test
@@ -258,6 +415,124 @@ def fit_scaler(X_train: np.ndarray) -> StandardScaler:
     return sc
 
 
+def fit_scaler_nanaware(X_raw: np.ndarray, fallback: StandardScaler) -> StandardScaler:
+    """StandardScaler from column statistics that ignore NaN entries.
+
+    Used by ``target_pool_measured``. Fitting a plain StandardScaler on the
+    *imputed* pool is wrong when most rows carry no real measurement: every
+    imputed row sits exactly at the source median, so it contributes zero
+    deviation and drags the pooled mean toward the source. Column-wise nanmean /
+    nanstd instead use each real measurement wherever it exists, which handles a
+    per-cell NaN pattern as gracefully as a per-row one.
+
+    A column with fewer than 2 real values carries no target-side scale
+    information at all; there is nothing to do but fall back to the source
+    scaler's entry for it, so that is done loudly.
+    """
+    n_real = np.isfinite(X_raw).sum(axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
+        mean = np.nanmean(X_raw, axis=0)
+        std = np.nanstd(X_raw, axis=0)
+    dead = (n_real < 2) | ~np.isfinite(mean) | ~np.isfinite(std) | (std == 0.0)
+    if dead.any():
+        print(f"      [scaler] {int(dead.sum())}/{dead.size} columns have <2 real "
+              f"PTB-XL values (or zero spread); falling back to source statistics "
+              f"for those columns.")
+        mean = np.where(dead, fallback.mean_, mean)
+        std = np.where(dead, fallback.scale_, std)
+    sc = StandardScaler()
+    sc.mean_, sc.scale_, sc.var_ = mean, std, std ** 2
+    sc.n_features_in_ = X_raw.shape[1]
+    sc.n_samples_seen_ = int(n_real.max()) if n_real.size else 0
+    return sc
+
+
+def standardise_target(
+    X_target: np.ndarray,
+    source_scaler: StandardScaler,
+    mode: str,
+    pool: np.ndarray | None = None,
+    pool_raw: np.ndarray | None = None,
+) -> np.ndarray:
+    """Standardise cross-domain (PTB-XL) inputs before a MedalCare-fit model.
+
+    ``mode="source"`` reproduces the historical path: reuse the scaler fitted on
+    MedalCare train. That is a defect, not a baseline. The two domains disagree
+    about per-coordinate spread by up to ~3x (report 2026-08-11 §12), so a Ridge
+    or LogReg fitted on MedalCare-standardised inputs is then handed PTB-XL
+    features at the wrong scale and its decision boundaries sit at the wrong
+    distances. Under it, `b2_coral_probe.py` measured cross-domain territory
+    macro-F1 *below* the shuffle null in two of three configs.
+
+    ``mode="target"`` fits a scaler on the PTB-XL matrix itself. This is
+    per-domain diagonal standardisation -- transductive unsupervised domain
+    adaptation in the AdaBN/CORAL lineage. It reads unlabelled target features
+    only; no target label is touched anywhere in this function.
+
+    ``mode="target_pool"`` fits on ``pool`` instead. The distinction
+    matters more than it looks. ``X_target`` here is always the *primary subset*
+    -- the ~438 PTB-XL records whose MI subclass maps to a known territory --
+    and that subset is chosen BY LABEL. Fitting scaler statistics on it therefore
+    conditions the standardisation on the very labels being predicted, which is a
+    subtle leak even though no label array is read. ``pool`` is the full PTB-XL
+    matrix for the same split, all rows, no label selection: same transduction,
+    but nothing label-dependent enters the scaler.
+
+    A fully *disjoint* pool exists for the latent path (the PTB-XL train split,
+    ~17k rows) but not for the 6 NeuroKit2 features, where only the test-split
+    file was ever built. Using it for one source and not the other would make the
+    two arms incomparable, so both use the unselected same-split pool.
+
+    ``mode="target_pool_measured"`` is ``target_pool`` with the imputed rows
+    excluded from the *statistics* (not from the evaluation). It exists because
+    ``target_pool`` is corrupted for the feature arm: the pool is every row of
+    the split, but only the MI-subclass rows were ever run through the feature
+    extractor, so ~75% of the pooled rows are entirely MedalCare-train medians.
+    Those rows shrink the pooled variance and pull the pooled mean toward the
+    source, i.e. ``target_pool`` partially reconstructs the ``source`` defect it
+    was introduced to avoid -- and it does so for the feature arm only, since
+    every latent row is real. That asymmetry biases the very Z-vs-features
+    comparison the strict mode is meant to adjudicate. This mode fits column-wise
+    nanmean/nanstd on the *un-imputed* pool instead, so it is exactly equivalent
+    to ``target_pool`` for the latent arm and changes only the feature arm.
+
+    Defaults deliberately differ by layer: this function defaults to
+    ``target_pool`` so any new caller gets the safe convention, while
+    ``--scaler-domain`` still defaults to ``target`` so a bare CLI invocation
+    reproduces the ``outputs/phase_b2_exp8_tgtscaler/`` snapshot that report §14
+    documents.
+
+    The historical path is kept reachable so the pre-fix numbers in
+    `outputs/phase_b2/` can be reproduced exactly.
+    """
+    if mode == "source":
+        return source_scaler.transform(X_target)
+    if mode == "target":
+        return fit_scaler(X_target).transform(X_target)
+    if mode == "target_pool":
+        if pool is None:
+            raise ValueError(
+                "scaler mode 'target_pool' needs the unselected PTB-XL pool, but "
+                "pool=None was passed. Falling back silently would quietly "
+                "reintroduce the label-selected fit this mode exists to avoid."
+            )
+        return fit_scaler(pool).transform(X_target)
+    if mode == "target_pool_measured":
+        if pool_raw is None:
+            raise ValueError(
+                "scaler mode 'target_pool_measured' needs the UN-IMPUTED PTB-XL "
+                "pool, but pool_raw=None was passed. Falling back to the imputed "
+                "pool would silently reintroduce the median-inflation this mode "
+                "exists to avoid."
+            )
+        return fit_scaler_nanaware(pool_raw, source_scaler).transform(X_target)
+    raise ValueError(
+        f"unknown scaler mode {mode!r}; expected 'source', 'target', "
+        f"'target_pool' or 'target_pool_measured'"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -291,13 +566,40 @@ def circular_r2(
 # ---------------------------------------------------------------------------
 
 def _ridge_K_matrix(X_train: np.ndarray, X_test: np.ndarray, alpha: float) -> np.ndarray:
-    """Precompute K = X_test @ (X_train^T X_train + alpha I)^{-1} X_train^T.
+    """Precompute the centred ridge hat matrix K, for intercept-aware prediction.
 
-    Then ``y_test_pred = K @ y_train`` for any y_train (used by permutation).
+    Returns K such that, for any target vector/matrix ``y_train``::
+
+        y_test_pred = K @ (y_train - y_train.mean(0)) + y_train.mean(0)
+
+    reproduces ``RidgeCV(fit_intercept=True).fit(X_train, y_train).predict(X_test)``.
+
+    FIXED 2026-08-10 (defect A3). This previously returned the *uncentred*
+    solution ``X_test @ (X^T X + aI)^-1 X^T`` and callers used it as
+    ``y_pred_perm = K @ y_train[perm]`` -- i.e. the permutation null was
+    computed with a ridge that has **no intercept**, while the observed
+    statistic came from a ridge that has one. With no intercept the null
+    predictor is shrunk toward 0 rather than toward the target mean, so null R²
+    sits near ``-(mean(y)/std(y))**2`` (e.g. about -18.7 for ``size``) instead
+    of near 0. Every permutation draw was then trivially worse than the observed
+    value and every ``permutation_p_r2`` pinned to the 1/(n_perm+1) floor --
+    a constant-zero predictor would have "passed" the same test.
+
+    Centring X the same way sklearn does makes the null a genuine
+    fit-the-shuffled-labels null, which is the thing the p-value claims to be.
     """
-    XtX = X_train.T @ X_train
-    M = np.linalg.solve(XtX + alpha * np.eye(X_train.shape[1]), X_train.T)
-    return X_test @ M  # shape (n_test, n_train)
+    x_mean = X_train.mean(axis=0, keepdims=True)
+    Xc_train = X_train - x_mean
+    Xc_test = X_test - x_mean
+    XtX = Xc_train.T @ Xc_train
+    M = np.linalg.solve(XtX + alpha * np.eye(Xc_train.shape[1]), Xc_train.T)
+    return Xc_test @ M  # shape (n_test, n_train)
+
+
+def _ridge_predict_perm(K: np.ndarray, y_train_perm: np.ndarray) -> np.ndarray:
+    """Intercept-aware ridge prediction for a permuted target (see A3 above)."""
+    y_mean = y_train_perm.mean(axis=0)
+    return K @ (y_train_perm - y_mean) + y_mean
 
 
 def fit_ridge_continuous(
@@ -310,7 +612,10 @@ def fit_ridge_continuous(
     n_perm: int = N_PERM,
 ) -> Dict[str, object]:
     """Fit RidgeCV for a single continuous target."""
-    model = RidgeCV(alphas=RIDGE_ALPHAS, cv=5)
+    # m3 fix: rows arrive sorted by territory, so an unshuffled KFold hands
+    # RidgeCV validation folds that are single-territory. Shuffle with the
+    # global SEED so alpha selection sees the same marginal as the fit.
+    model = RidgeCV(alphas=RIDGE_ALPHAS, cv=KFold(n_splits=5, shuffle=True, random_state=SEED))
     model.fit(X_train, y_train)
     alpha = float(model.alpha_)
     y_pred = model.predict(X_test)
@@ -331,7 +636,7 @@ def fit_ridge_continuous(
     perm_r2 = np.empty(n_perm)
     for p in range(n_perm):
         perm = rng.permutation(n_train)
-        y_pred_perm = K @ y_train[perm]
+        y_pred_perm = _ridge_predict_perm(K, y_train[perm])
         perm_r2[p] = r2_score(y_test, y_pred_perm)
     p_value = float((np.sum(perm_r2 >= r2) + 1) / (n_perm + 1))
 
@@ -359,7 +664,8 @@ def fit_ridge_phi(
     """Joint sin/cos Ridge with multi-output CV (single shared alpha)."""
     Y_train = np.stack([np.sin(phi_train), np.cos(phi_train)], axis=1)
     Y_test = np.stack([np.sin(phi_test), np.cos(phi_test)], axis=1)
-    model = RidgeCV(alphas=RIDGE_ALPHAS, cv=5)
+    # m3 fix: shuffled KFold -- see fit_ridge_continuous.
+    model = RidgeCV(alphas=RIDGE_ALPHAS, cv=KFold(n_splits=5, shuffle=True, random_state=SEED))
     model.fit(X_train, Y_train)
     alpha = float(np.atleast_1d(model.alpha_).item())  # scalar shared alpha
     Y_pred = model.predict(X_test)
@@ -384,10 +690,15 @@ def fit_ridge_phi(
     perm_cr2 = np.empty(n_perm)
     for p in range(n_perm):
         perm = rng.permutation(n_train)
-        Y_perm_pred = K @ Y_train[perm]
+        Y_perm_pred = _ridge_predict_perm(K, Y_train[perm])
         phi_perm_pred = np.arctan2(Y_perm_pred[:, 0], Y_perm_pred[:, 1])
         perm_cr2[p] = circular_r2(phi_perm_pred, phi_test, phi_train_mean)
     p_value = float((np.sum(perm_cr2 >= cr2) + 1) / (n_perm + 1))
+
+    # In-sample phi predictions on the TRAIN pool -- needed by Pipeline B to fit
+    # the phi->4c calibrator out-of-sample w.r.t. the evaluation pools (A2 fix).
+    Y_pred_train = model.predict(X_train)
+    phi_pred_train = np.arctan2(Y_pred_train[:, 0], Y_pred_train[:, 1])
 
     return {
         "alpha": alpha,
@@ -400,6 +711,7 @@ def fit_ridge_phi(
         "permutation_p_circular_r2": p_value,
         "n_test": int(n_test),
         "_phi_pred": phi_pred,
+        "_phi_pred_train": phi_pred_train,
         "_phi_train_mean": phi_train_mean,
         "_model": model,  # for cross-domain reuse
     }
@@ -421,19 +733,31 @@ def fit_logistic_binary(
         raise RuntimeError("Test labels are single-class for rho_eps_max; cannot compute AUC.")
 
     # Manual CV to pick C (LogisticRegressionCV is finicky with `cv` + class_weight; do this explicitly).
+    # m1 fix: this was the only classifier in the file without
+    # class_weight="balanced". The metric here is AUC, which is
+    # threshold-free, so the effect is small -- but leaving one estimator
+    # unbalanced while every other probe is balanced is an inconsistency an
+    # examiner will ask about, and it does change the fitted decision
+    # function (hence the permutation null) rather than just the threshold.
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
     cv_scores = {}
     for C in LOGREG_CS:
         fold_aucs = []
         for tr_idx, va_idx in skf.split(X_train, yb_train):
-            est = LogisticRegression(C=C, penalty="l2", solver="lbfgs", max_iter=2000)
+            est = LogisticRegression(
+                C=C, penalty="l2", solver="lbfgs", max_iter=2000,
+                class_weight="balanced",
+            )
             est.fit(X_train[tr_idx], yb_train[tr_idx])
             scores_va = est.predict_proba(X_train[va_idx])[:, 1]
             fold_aucs.append(roc_auc_score(yb_train[va_idx], scores_va))
         cv_scores[C] = float(np.mean(fold_aucs))
     best_C = max(cv_scores, key=cv_scores.get)
 
-    model = LogisticRegression(C=best_C, penalty="l2", solver="lbfgs", max_iter=2000)
+    model = LogisticRegression(
+        C=best_C, penalty="l2", solver="lbfgs", max_iter=2000,
+        class_weight="balanced",
+    )
     model.fit(X_train, yb_train)
     y_score = model.predict_proba(X_test)[:, 1]
     auc = float(roc_auc_score(yb_test, y_score))
@@ -451,7 +775,10 @@ def fit_logistic_binary(
     n_train = X_train.shape[0]
     for p in range(n_perm):
         perm = rng.permutation(n_train)
-        m = LogisticRegression(C=best_C, penalty="l2", solver="lbfgs", max_iter=2000)
+        m = LogisticRegression(
+            C=best_C, penalty="l2", solver="lbfgs", max_iter=2000,
+            class_weight="balanced",
+        )
         m.fit(X_train, yb_train[perm])
         perm_auc[p] = roc_auc_score(yb_test, m.predict_proba(X_test)[:, 1])
     p_value = float((np.sum(perm_auc >= auc) + 1) / (n_perm + 1))
@@ -493,10 +820,77 @@ def paired_bootstrap_continuous(
         m_b = metric_fn(y_test[idx], y_pred_b[idx])
         diffs[b] = m_a - m_b
     sign = 1.0 if higher_is_better else -1.0
+    n_tail = int(np.sum(sign * diffs <= 0.0))
     return {
         "mean_diff": float(diffs.mean()),
         "diff_ci95": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))],
-        "p_a_beats_b": float(np.mean(sign * diffs <= 0.0)),
+        # m4 fix: the raw tail fraction can be exactly 0.0, which reads as
+        # "p = 0" in a table -- an impossible claim from a finite resample.
+        # (n_tail + 1) / (n_boot + 1) bounds it below by 1/(n_boot+1) and is
+        # the same convention used for the permutation p-values in this file.
+        "p_a_beats_b": float((n_tail + 1) / (n_boot + 1)),
+        "p_a_beats_b_raw_tail": float(n_tail / n_boot),
+        "n_boot": int(n_boot),
+    }
+
+
+def paired_macro_f1(
+    y_true: np.ndarray,
+    y_pred_a: np.ndarray,
+    y_pred_b: np.ndarray,
+    labels: List[str],
+    rng: np.random.Generator,
+    n_boot: int = N_BOOT,
+    n_perm: int = N_PERM_BINARY,
+) -> Dict[str, object]:
+    """Is arm A's macro-F1 different from arm B's, ON THE SAME ROWS?
+
+    Every published cross-domain number so far tests each arm against its own
+    label-shuffle null, which answers "is this arm better than chance?" and NOT
+    "is one arm better than the other?" -- the actual claim being made. Scoring
+    both arms on one set of resampled rows removes the row-sampling variance
+    that dominates a two-independent-CIs comparison, so overlapping marginal
+    CIs and a decisive paired delta are perfectly consistent.
+
+    Two nulls, because they answer different questions:
+      * bootstrap  -> a CI on the delta, i.e. how big is the gap and how
+        precisely do we know it;
+      * paired swap permutation -> under exchangeability of the two prediction
+        streams, flip A/B per row and recompute. This conditions on the actual
+        predictions rather than on the labels, which is the right null for
+        "these two arms are interchangeable".
+
+    Sign convention: delta = A - B, so a positive delta favours A.
+    """
+    def _f1(yt: np.ndarray, yp: np.ndarray) -> float:
+        return float(f1_score(yt, yp, labels=labels, average="macro", zero_division=0))
+
+    n = y_true.size
+    obs = _f1(y_true, y_pred_a) - _f1(y_true, y_pred_b)
+
+    diffs = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = rng.integers(0, n, n)
+        diffs[b] = _f1(y_true[idx], y_pred_a[idx]) - _f1(y_true[idx], y_pred_b[idx])
+
+    perm = np.empty(n_perm)
+    for q in range(n_perm):
+        swap = rng.random(n) < 0.5
+        pa = np.where(swap, y_pred_b, y_pred_a)
+        pb = np.where(swap, y_pred_a, y_pred_b)
+        perm[q] = _f1(y_true, pa) - _f1(y_true, pb)
+    p_two_sided = float((np.sum(np.abs(perm) >= abs(obs)) + 1) / (n_perm + 1))
+
+    n_tail = int(np.sum(diffs <= 0.0))
+    return {
+        "delta_macro_f1_a_minus_b": float(obs),
+        "delta_ci95": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))],
+        "p_a_beats_b_bootstrap": float((n_tail + 1) / (n_boot + 1)),
+        "p_two_sided_paired_swap": p_two_sided,
+        "n_rows": int(n),
+        "n_disagree": int((y_pred_a != y_pred_b).sum()),
+        "n_boot": int(n_boot),
+        "n_perm": int(n_perm),
     }
 
 
@@ -518,10 +912,14 @@ def paired_bootstrap_circular(
             - circular_r2(phi_pred_b[idx], phi_test[idx], phi_train_mean)
         )
         diffs[b] = d
+    n_tail = int(np.sum(diffs <= 0.0))
     return {
         "mean_diff": float(diffs.mean()),
         "diff_ci95": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))],
-        "p_a_beats_b": float(np.mean(diffs <= 0.0)),
+        # m4 fix -- see paired_bootstrap_continuous.
+        "p_a_beats_b": float((n_tail + 1) / (n_boot + 1)),
+        "p_a_beats_b_raw_tail": float(n_tail / n_boot),
+        "n_boot": int(n_boot),
     }
 
 
@@ -595,8 +993,30 @@ def load_ptbxl_subclass_csv() -> pd.DataFrame:
 def load_ptbxl_latents(config: str, *, suffix: str = "") -> np.ndarray:
     """Load PTB-XL latents for ``config``, optionally with a directory ``suffix``."""
     stem = CONFIG_LATENT_STEMS[config]
-    p = REPO_ROOT / "outputs" / "latents" / f"{stem}_ptbxl{suffix}" / "latents.npz"
-    return np.load(p, allow_pickle=True)["Z"].astype(np.float64)
+    p = _resolve_latent_dir(stem, "ptbxl", "test", suffix)
+    npz = np.load(p, allow_pickle=True)
+    Z = npz["Z"].astype(np.float64)
+    # Same positional-join hazard as the feature matrix: `row_idx` from the
+    # subclass CSV indexes straight into this array, so an export over a
+    # different fold selection would score the wrong ECGs without complaint.
+    if _PTBXL_EXPECTED_ROWS is not None and Z.shape[0] != _PTBXL_EXPECTED_ROWS:
+        raise SystemExit(
+            f"PTB-XL row-count mismatch: latents {Z.shape[0]} ({p}) vs subclass "
+            f"CSV {_PTBXL_EXPECTED_ROWS} ({PTBXL_SUBCLASS_PATH.name}). Re-export "
+            f"with the matching --split / fold selection."
+        )
+    # Exports written after 2026-08-11 carry ecg_id, which upgrades the count
+    # check to an element-wise one. Older exports have no such key.
+    if _PTBXL_EXPECTED_IDS is not None and "ecg_id" in npz.files:
+        got = npz["ecg_id"].astype(np.int64)
+        if not np.array_equal(got, _PTBXL_EXPECTED_IDS):
+            n_bad = int((got != _PTBXL_EXPECTED_IDS).sum())
+            raise SystemExit(
+                f"PTB-XL row-ORDER mismatch: {n_bad}/{got.size} ecg_id entries in "
+                f"{p} disagree with {PTBXL_SUBCLASS_PATH.name}. The latent export "
+                f"and the subclass CSV are not the same row set."
+            )
+    return Z
 
 
 def load_ptbxl_features() -> Tuple[np.ndarray, np.ndarray]:
@@ -669,6 +1089,9 @@ def cross_domain_phi_eval(
     n_boot: int,
     n_perm: int,
     label: str = "",
+    scaler_mode: str = "target_pool",
+    scaler_pool: np.ndarray | None = None,
+    scaler_pool_raw: np.ndarray | None = None,
 ) -> Dict[str, object]:
     """Apply MedalCare-fit phi Ridge to PTB-XL inputs, bin, evaluate.
 
@@ -676,12 +1099,23 @@ def cross_domain_phi_eval(
     ----------
     phi_model : RidgeCV fitted on standardised MedalCare-train Z (or features),
                 multi-output (sin, cos).
-    scaler    : StandardScaler fitted on the same MedalCare-train inputs.
+    scaler    : StandardScaler fitted on the same MedalCare-train inputs. Used
+                only when ``scaler_mode="source"``.
     X_ptbxl   : raw PTB-XL inputs aligned to ``territory_truth`` (filtered to
                 single-territory primary MI rows).
     territory_truth : object array of {Anterior, Inferior, Lateral}.
+    scaler_mode : see ``standardise_target``. Default "target_pool" fits the
+                scaler on the label-unselected PTB-XL pool; "target" fits it on
+                ``X_ptbxl`` itself; "source" reproduces the pre-2026-08-11
+                behaviour.
+    scaler_pool : full unselected PTB-XL matrix for the same split. Required by
+                ``scaler_mode="target_pool"``.
+    scaler_pool_raw : the same matrix BEFORE median imputation. Required by
+                ``scaler_mode="target_pool_measured"``.
     """
-    X_std = scaler.transform(X_ptbxl)
+    X_std = standardise_target(
+        X_ptbxl, scaler, scaler_mode, scaler_pool, scaler_pool_raw
+    )
     Y_pred = phi_model.predict(X_std)
     phi_pred = np.arctan2(Y_pred[:, 0], Y_pred[:, 1])
     territory_pred = bin_phi_to_territory(phi_pred)
@@ -1073,6 +1507,8 @@ def _predict_phi_to_4c(calibrator: object, phi_pred: np.ndarray) -> np.ndarray:
 
 def pipeline_b_for_source(
     src_name: str,
+    phi_pred_train: np.ndarray,   # MedalCare TRAIN phi predictions (calibrator fit pool)
+    y_train_4c: np.ndarray,       # MedalCare TRAIN territory_4c
     phi_pred_test: np.ndarray,    # MedalCare TEST phi predictions, n=1200
     y_test_4c: np.ndarray,        # MedalCare TEST territory_4c, n=1200
     phi_pred_ptbxl: np.ndarray,   # PTB-XL primary 4c phi predictions, n=438
@@ -1083,14 +1519,28 @@ def pipeline_b_for_source(
 ) -> Dict[str, object]:
     """Run one full Pipeline B leg for a single source (Z or ecg_features).
 
-    The phi regressor is NOT refit -- ``phi_pred_test`` and ``phi_pred_ptbxl``
-    are assumed pre-computed by the upstream phi-Ridge in this config. The
-    calibrator is fit on (sin/cos of phi_pred_test) -> y_test_4c and then
-    applied to phi_pred_ptbxl. The hardcoded wedge baseline is also scored for
-    delta comparison.
+    The phi regressor is NOT refit -- ``phi_pred_*`` are assumed pre-computed by
+    the upstream phi-Ridge in this config.
+
+    FIXED 2026-08-10 (defect A2). The calibrator was previously fit on
+    ``(phi_pred_test, y_test_4c)`` and then scored on those same 1,200 rows,
+    with best-of-3 model selection also performed on them. ``in_domain_
+    calibrator_4c`` was therefore a pure resubstitution score (macro-F1 0.998)
+    and meant nothing. The calibrator is now fit on the MedalCare **train**
+    split, so both the MedalCare-test and the PTB-XL evaluations are genuinely
+    out-of-sample with respect to the calibrator.
+
+    Note on the remaining (conservative) bias: ``phi_pred_train`` comes from the
+    phi-Ridge predicting on its own training rows, so it is tighter around the
+    truth than test-time predictions. A calibrator tuned on tight inputs has
+    sharper decision boundaries than is optimal for noisier ones -- that biases
+    the reported score DOWN, not up, so it cannot manufacture a positive result.
     """
-    print(f"      [pipeline-B / {src_name}] fitting phi->4c calibrator on n_train={phi_pred_test.size}")
-    calibrator, cal_name, cv_scores = fit_phi_to_4c_calibrator(phi_pred_test, y_test_4c)
+    print(
+        f"      [pipeline-B / {src_name}] fitting phi->4c calibrator on "
+        f"MedalCare TRAIN n={phi_pred_train.size} (scored out-of-sample)"
+    )
+    calibrator, cal_name, cv_scores = fit_phi_to_4c_calibrator(phi_pred_train, y_train_4c)
     print(
         f"      [pipeline-B / {src_name}] best calibrator = {cal_name}; "
         f"cv_macro_f1 = {cv_scores[cal_name]:.3f}  (others: "
@@ -1099,6 +1549,7 @@ def pipeline_b_for_source(
     )
 
     # Predicted territories from the calibrator (in-domain + cross-domain).
+    # Both pools are disjoint from the calibrator's fit pool (MedalCare TRAIN).
     y_pred_test_cal = _predict_phi_to_4c(calibrator, phi_pred_test)
     y_pred_ptbxl_cal = _predict_phi_to_4c(calibrator, phi_pred_ptbxl)
     # Predicted territories from the hardcoded wedges (cross-domain only -- the
@@ -1130,6 +1581,8 @@ def pipeline_b_for_source(
     return {
         "calibrator_name": cal_name,
         "calibrator_cv_scores": cv_scores,
+        "calibrator_fit_pool": "medalcare_train",  # A2 fix marker; was "medalcare_test"
+        "calibrator_n_fit": int(phi_pred_train.size),
         "phi_4c_outer_boundary_rad": PHI_4C_OUTER_BOUNDARY,
         "phi_4c_inner_boundary_rad": PHI_4C_INNER_BOUNDARY,
         "in_domain_calibrator_4c": in_domain_cal,
@@ -1357,7 +1810,80 @@ def main() -> None:
         "--no-pipeline-8c", action="store_true",
         help="Skip the in-domain 8-class audit (Section 3.4).",
     )
+    parser.add_argument(
+        "--feature-set", choices=["global6", "spatial54"], default="global6",
+        help="Which hand-crafted control to compare the latent against. "
+             "'global6' (default) is the original NeuroKit2 set: 4 global scalars "
+             "plus an ST average over V2-V6 and a lead-II T amplitude -- it has "
+             "almost no spatial content, so it cannot represent infarct TERRITORY, "
+             "which is defined by which leads deviate. 'spatial54' adds per-lead "
+             "ST_J60 / Q_amp / R_amp / T_amp in all 12 leads (48 columns) and keeps "
+             "the original 6 as a strict superset. See report S15.",
+    )
+    parser.add_argument(
+        "--ptbxl-subclass-csv", type=Path, default=None,
+        help="Override the PTB-XL MI-subclass CSV (default: the fold-10 build, "
+             "data/ptbxl_mi_subclass.csv). Pass the all-folds build together with "
+             "--ptbxl-features and an all-folds latent export when the encoder "
+             "never saw PTB-XL, which frees folds 1-9 for evaluation and takes "
+             "the 4-class endpoint from n=438 to n=4324.",
+    )
+    parser.add_argument(
+        "--ptbxl-features", type=Path, default=None,
+        help="Override the PTB-XL hand-crafted feature .npz. Must have been "
+             "extracted over the SAME fold selection as --ptbxl-subclass-csv and "
+             "the PTB-XL latent export -- all three are indexed positionally "
+             "against one row order and nothing downstream re-checks the join.",
+    )
+    parser.add_argument(
+        "--scaler-domain",
+        choices=["target", "target_pool", "target_pool_measured", "source"],
+        default="target",
+        help="Which domain's statistics standardise the PTB-XL inputs before a "
+             "MedalCare-fit probe. 'target' (default) fits a StandardScaler on the "
+             "evaluated PTB-XL matrix itself -- transductive, unlabelled-target-only, "
+             "but the evaluated rows are a LABEL-SELECTED subset, so the statistics "
+             "condition on the labels being predicted. 'target_pool' fits on the "
+             "full unselected PTB-XL matrix for the same split, removing that "
+             "dependence. 'target_pool_measured' is the strictest: same pool, but "
+             "column statistics ignore NaN, so the ~75% of feature-arm rows that "
+             "are pure MedalCare-median imputation stop deflating the variance and "
+             "dragging the mean toward source (it is identical to 'target_pool' for "
+             "the latent arm, whose rows are all real). 'source' reuses the "
+             "MedalCare scaler, reproducing the pre-2026-08-11 behaviour; it is a "
+             "defect kept reachable only to regenerate the old numbers. "
+             "Default stays 'target' so a bare invocation still reproduces the "
+             "outputs/phase_b2_exp8_tgtscaler/ snapshot that Part 6 / report S14 "
+             "documents; promote it only with a run that shows the two agree. "
+             "See standardise_target().",
+    )
     args = parser.parse_args()
+
+    # The choice of scaler domain silently changes every cross-domain number in
+    # this script, so it is announced rather than buried in args.json.
+    print("=" * 78)
+    print(f"cross-domain input standardisation: --scaler-domain {args.scaler_domain}")
+    if args.scaler_domain == "source":
+        print("  !! MedalCare statistics applied to PTB-XL inputs. This is the")
+        print("  !! pre-2026-08-11 defect path, retained for reproduction only.")
+    elif args.scaler_domain == "target_pool":
+        print("  PTB-XL standardised by the statistics of the FULL unselected")
+        print("  same-split matrix, not the evaluated subset. The scaler cannot")
+        print("  see which rows were picked by MI subclass.")
+        print("  NOTE: for the FEATURE arm that pool is ~75% median-imputed rows,")
+        print("  which deflate its variance. --scaler-domain target_pool_measured")
+        print("  excludes them from the statistics.")
+    elif args.scaler_domain == "target_pool_measured":
+        print("  PTB-XL standardised by NaN-aware statistics of the full unselected")
+        print("  same-split matrix: label-unselected like target_pool, but rows that")
+        print("  carry no real measurement no longer contribute. Strictest option,")
+        print("  and the only one that treats the Z and feature arms alike.")
+    else:
+        print("  PTB-XL standardised by its own statistics (transductive UDA;")
+        print("  unlabelled target features only, no target label is read).")
+        print("  NOTE: the evaluated rows are label-selected, so these statistics")
+        print("  do condition on the label. --scaler-domain target_pool avoids it.")
+    print("=" * 78)
 
     # Resolve output directory based on --latent-suffix. When the user passes
     # --latent-suffix _inlp, we write to outputs/phase_b2_inlp/ unless they
@@ -1369,18 +1895,57 @@ def main() -> None:
         args.out = out_dir / "in_domain.json"
     else:
         out_dir = args.out.parent
-    out_cd_path = out_dir / "cross_domain.json"
-    out_a_path = out_dir / "cross_domain_4c_pipelineA.json"
-
-    out_b_path = out_dir / "cross_domain_4c_pipelineB.json"
-    out_8c_path = out_dir / "in_domain_8c.json"
+    # Cross-domain filenames follow --out's stem. These used to be fixed, so two
+    # runs sharing an output dir would silently overwrite each other's
+    # cross-domain tables while --out protected only the in-domain file -- which
+    # is exactly what the K64 pass did to the four-config tables this morning
+    # (EXECUTION_LOG Part 9 S9.1). `in_domain.json` -> no tag, preserving every
+    # historical filename; `in_domain_K64.json` -> `cross_domain_K64.json`.
+    stem = args.out.stem
+    tag = stem[len("in_domain"):] if stem.startswith("in_domain") else f"_{stem}"
+    out_cd_path = out_dir / f"cross_domain{tag}.json"
+    out_a_path = out_dir / f"cross_domain_4c_pipelineA{tag}.json"
+    out_b_path = out_dir / f"cross_domain_4c_pipelineB{tag}.json"
+    out_8c_path = out_dir / f"in_domain_8c{tag}.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
-    rng = np.random.default_rng(SEED)
+    # NB: the RNG is created per-config inside the loop below (m10), not here.
     if suffix:
         print(f"[latent-suffix] reading from outputs/latents/.../{{split}}{suffix}/")
         print(f"[latent-suffix] writing to {out_dir.relative_to(REPO_ROOT)}/")
+
+    # Feature-set selection. `load_features()` and `load_ptbxl_features()` read
+    # these as module globals, so rebinding here -- before any load -- redirects
+    # every consumer, including the cross-domain path. Must precede load_features().
+    if args.feature_set == "spatial54":
+        global FEAT_TRAIN_PATH, FEAT_TEST_PATH, FEAT_PTBXL_PATH
+        FEAT_TRAIN_PATH = REPO_ROOT / "data" / "ecg_features_spatial_medalcare_train.npz"
+        FEAT_TEST_PATH = REPO_ROOT / "data" / "ecg_features_spatial_medalcare_test.npz"
+        FEAT_PTBXL_PATH = REPO_ROOT / "data" / "ecg_features_spatial_ptbxl_test.npz"
+        missing = [p for p in (FEAT_TRAIN_PATH, FEAT_TEST_PATH, FEAT_PTBXL_PATH)
+                   if not p.exists()]
+        if missing:
+            raise SystemExit(
+                "--feature-set spatial54 needs files that are not on disk:\n  "
+                + "\n  ".join(str(p) for p in missing)
+                + "\nRun: python scripts/extract_ecg_features_spatial.py")
+        print("[features] feature-set = spatial54 (48 per-lead + the original 6)")
+
+    # Cross-domain row-set overrides. Applied AFTER the feature-set block so an
+    # explicit --ptbxl-features wins over the spatial54 default, and before any
+    # load so every consumer sees the same three-way-consistent row order.
+    if args.ptbxl_subclass_csv is not None:
+        global PTBXL_SUBCLASS_PATH
+        PTBXL_SUBCLASS_PATH = args.ptbxl_subclass_csv.resolve()
+        if not PTBXL_SUBCLASS_PATH.exists():
+            raise SystemExit(f"--ptbxl-subclass-csv not found: {PTBXL_SUBCLASS_PATH}")
+        print(f"[cross-domain] subclass CSV -> {PTBXL_SUBCLASS_PATH.name}")
+    if args.ptbxl_features is not None:
+        FEAT_PTBXL_PATH = args.ptbxl_features.resolve()
+        if not FEAT_PTBXL_PATH.exists():
+            raise SystemExit(f"--ptbxl-features not found: {FEAT_PTBXL_PATH}")
+        print(f"[cross-domain] PTB-XL features -> {FEAT_PTBXL_PATH.name}")
 
     # Load shared data
     targets = load_targets()
@@ -1470,6 +2035,11 @@ def main() -> None:
     if do_cd or need_4c:
         print("\n[cross-domain] loading PTB-XL ground-truth subclass CSV + features...")
         ptbxl_subclass_df = load_ptbxl_subclass_csv()
+        global _PTBXL_EXPECTED_ROWS
+        _PTBXL_EXPECTED_ROWS = len(ptbxl_subclass_df)
+        if "ecg_id" in ptbxl_subclass_df.columns:
+            global _PTBXL_EXPECTED_IDS
+            _PTBXL_EXPECTED_IDS = ptbxl_subclass_df["ecg_id"].to_numpy(dtype=np.int64)
         # Build the single-territory primary subset (Anterior / Inferior / Lateral only).
         primary_mask = ptbxl_subclass_df["territory"].isin(TERRITORY_LABELS)
         primary_df = ptbxl_subclass_df[primary_mask].copy()
@@ -1483,11 +2053,29 @@ def main() -> None:
         # PTB-XL ECG features for NK2 baseline (impute with MedalCare-train medians for
         # consistency with in-domain analysis).
         feat_ptbxl_full, _ = load_ptbxl_features()
+        # `row_idx` indexes positionally into the fold selection the subclass CSV
+        # was built over. Nothing downstream re-checks that join, so a features
+        # file extracted over a different fold set would silently score the wrong
+        # ECGs. Assert on the one thing that always disagrees when that happens.
+        if feat_ptbxl_full.shape[0] != len(ptbxl_subclass_df):
+            raise SystemExit(
+                f"PTB-XL row-count mismatch: features {feat_ptbxl_full.shape[0]} "
+                f"({FEAT_PTBXL_PATH.name}) vs subclass CSV {len(ptbxl_subclass_df)} "
+                f"({PTBXL_SUBCLASS_PATH.name}). They must be built over the same "
+                f"stratification folds."
+            )
         feat_ptbxl_primary = feat_ptbxl_full[primary_idx].astype(np.float64)
         # Impute using MedalCare-train medians already computed above.
         for j in range(feat_ptbxl_primary.shape[1]):
             nan_mask = np.isnan(feat_ptbxl_primary[:, j])
             feat_ptbxl_primary[nan_mask, j] = feat_medians[j]
+        # Scaler pool for --scaler-domain target_pool: every row of the split, not
+        # just the MI-subclass-selected ones. Imputed identically so the pooled
+        # statistics describe the same matrix the probe will be handed.
+        feat_ptbxl_pool = feat_ptbxl_full.astype(np.float64).copy()
+        for j in range(feat_ptbxl_pool.shape[1]):
+            nan_mask = np.isnan(feat_ptbxl_pool[:, j])
+            feat_ptbxl_pool[nan_mask, j] = feat_medians[j]
 
     if need_4c:
         # Pipeline-A / Pipeline-B primary 4-class subset (n=438 in fold10).
@@ -1517,6 +2105,9 @@ def main() -> None:
 
     for cfg in configs:
         print(f"\n{'='*60}\n[CONFIG] {cfg}{(' [' + suffix + ']') if suffix else ''}\n{'='*60}")
+        # m10 fix: per-config RNG stream so this config's CIs and p-values do
+        # not depend on which other configs were passed on the command line.
+        rng = config_rng(cfg)
         Z_train_full, Z_test_full = load_config_latents(cfg, suffix=suffix)
         Z_train_mi = Z_train_full[idx_train].astype(np.float64)
         Z_test_mi = Z_test_full[idx_test].astype(np.float64)
@@ -1613,6 +2204,9 @@ def main() -> None:
                 territory_truth=primary_truth,
                 rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
                 label=f"{cfg}/Z",
+                scaler_mode=args.scaler_domain,
+                scaler_pool=Z_ptbxl_full.astype(np.float64),
+                scaler_pool_raw=Z_ptbxl_full.astype(np.float64),
             )
             cd_f = cross_domain_phi_eval(
                 phi_model=cfg_result["ecg_features"]["phi"]["_model"],
@@ -1621,6 +2215,9 @@ def main() -> None:
                 territory_truth=primary_truth,
                 rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
                 label=f"{cfg}/ecg_features",
+                scaler_mode=args.scaler_domain,
+                scaler_pool=feat_ptbxl_pool,
+                scaler_pool_raw=feat_ptbxl_full.astype(np.float64),
             )
             cd_results[cfg] = {"Z": cd_z, "ecg_features": cd_f}
 
@@ -1655,8 +2252,13 @@ def main() -> None:
             else:
                 Z_ptbxl_full_a = load_ptbxl_latents(cfg, suffix=suffix)
             Z_ptbxl_primary_4c = Z_ptbxl_full_a[primary_4c_idx].astype(np.float64)
-            Z_ptbxl_primary_4c_std = z_scaler.transform(Z_ptbxl_primary_4c)
-            feat_ptbxl_primary_4c_std = feat_scaler.transform(feat_ptbxl_primary_4c)
+            Z_ptbxl_primary_4c_std = standardise_target(
+                Z_ptbxl_primary_4c, z_scaler, args.scaler_domain,
+                Z_ptbxl_full_a.astype(np.float64),
+                Z_ptbxl_full_a.astype(np.float64))
+            feat_ptbxl_primary_4c_std = standardise_target(
+                feat_ptbxl_primary_4c, feat_scaler, args.scaler_domain,
+                feat_ptbxl_pool, feat_ptbxl_full.astype(np.float64))
 
             pa_z = pipeline_a_for_source(
                 src_name=f"{cfg}/Z",
@@ -1679,6 +2281,48 @@ def main() -> None:
                 rng=rng, n_boot=args.n_boot, n_perm=args.n_perm_binary,
             )
             pipeline_a_results[cfg] = {"Z": pa_z, "ecg_features": pa_f}
+
+            # --- Paired latent-vs-control test on the macro-F1 endpoints.
+            # Until now each arm was only tested against its OWN label-shuffle
+            # null, which answers "beats chance?" -- but the claim being made is
+            # "one arm beats the other", and that needs the two scored on the
+            # same rows. Both arms are fit on identical MedalCare rows and
+            # evaluated on identical PTB-XL rows, so the pairing is exact.
+            paired: Dict[str, Dict[str, object]] = {}
+            for endpoint, lab in (
+                ("cross_domain_4c", TERRITORIES_4C),   # pre-registered primary
+                ("cross_domain_2c", TERRITORIES_2C),
+                ("in_domain_4c",    TERRITORIES_4C),
+            ):
+                yt_z, yt_f = pa_z[endpoint]["_y_true"], pa_f[endpoint]["_y_true"]
+                if not np.array_equal(yt_z, yt_f):
+                    # The 2c collapse drops rows on a per-arm predicted value,
+                    # so a future label-map edit could desynchronise the arms.
+                    # Refuse to report a "paired" number that is not paired.
+                    print(f"    [WARN] {endpoint}: truth vectors differ between "
+                          f"arms ({yt_z.size} vs {yt_f.size}); skipping paired test")
+                    continue
+                paired[endpoint] = paired_macro_f1(
+                    yt_z,
+                    pa_z[endpoint]["_y_pred"],
+                    pa_f[endpoint]["_y_pred"],
+                    lab,
+                    # Own stream, per derive_rng's contract: drawing from the
+                    # shared `rng` here would shift every subsequent CI and
+                    # p-value in this config (Pipeline B, the 8c audit) and
+                    # break reproduction against the stored snapshots.
+                    derive_rng(cfg, "paired_Z_vs_features", endpoint),
+                    n_boot=args.n_boot, n_perm=args.n_perm_binary,
+                )
+            pipeline_a_results[cfg]["paired_Z_vs_features"] = paired
+            for endpoint, d in paired.items():
+                print(
+                    f"    paired {endpoint}: dF1(Z-control) = "
+                    f"{d['delta_macro_f1_a_minus_b']:+.4f} "
+                    f"[{d['delta_ci95'][0]:+.4f}, {d['delta_ci95'][1]:+.4f}]  "
+                    f"p_swap = {d['p_two_sided_paired_swap']:.4f}  "
+                    f"(n={d['n_rows']}, disagree={d['n_disagree']})"
+                )
 
             # Confusion-matrix plot (4c, Z only).
             cm_a_path = out_dir / f"cm_A_4c_{cfg}.png"
@@ -1735,8 +2379,13 @@ def main() -> None:
                 # built; load + standardise now so Pipeline B is independent.
                 Z_ptbxl_full_b = load_ptbxl_latents(cfg, suffix=suffix)
                 Z_ptbxl_primary_4c = Z_ptbxl_full_b[primary_4c_idx].astype(np.float64)
-                Z_ptbxl_primary_4c_std = z_scaler.transform(Z_ptbxl_primary_4c)
-                feat_ptbxl_primary_4c_std = feat_scaler.transform(feat_ptbxl_primary_4c)
+                Z_ptbxl_primary_4c_std = standardise_target(
+                    Z_ptbxl_primary_4c, z_scaler, args.scaler_domain,
+                    Z_ptbxl_full_b.astype(np.float64),
+                    Z_ptbxl_full_b.astype(np.float64))
+                feat_ptbxl_primary_4c_std = standardise_target(
+                    feat_ptbxl_primary_4c, feat_scaler, args.scaler_domain,
+                    feat_ptbxl_pool, feat_ptbxl_full.astype(np.float64))
 
             phi_model_z = cfg_result["Z"]["phi"]["_model"]
             phi_model_f = cfg_result["ecg_features"]["phi"]["_model"]
@@ -1747,6 +2396,8 @@ def main() -> None:
 
             pb_z = pipeline_b_for_source(
                 src_name=f"{cfg}/Z",
+                phi_pred_train=cfg_result["Z"]["phi"]["_phi_pred_train"],
+                y_train_4c=territory_4c_train,
                 phi_pred_test=phi_pred_test_z,
                 y_test_4c=territory_4c_test,
                 phi_pred_ptbxl=phi_pred_ptbxl_z,
@@ -1755,6 +2406,8 @@ def main() -> None:
             )
             pb_f = pipeline_b_for_source(
                 src_name=f"{cfg}/ecg_features",
+                phi_pred_train=cfg_result["ecg_features"]["phi"]["_phi_pred_train"],
+                y_train_4c=territory_4c_train,
                 phi_pred_test=phi_pred_test_f,
                 y_test_4c=territory_4c_test,
                 phi_pred_ptbxl=phi_pred_ptbxl_f,
@@ -1889,6 +2542,60 @@ def main() -> None:
         "results": results,
     }
 
+    # ---- A5: Holm-Bonferroni over the pre-registered primary endpoints ------
+    # The family spans both payloads, so resolve against a merged tree: the
+    # in-domain `results` plus the Pipeline-A dict under a "pipeline_a" prefix.
+    # pipeline_a_results is already populated by this point (it is filled in the
+    # per-config loop above); it is empty when --no-pipeline-a is passed, in
+    # which case that endpoint is reported as not computed.
+    endpoint_tree: Dict[str, object] = dict(results)
+    endpoint_tree["pipeline_a"] = pipeline_a_results
+
+    def _lookup(tree: Dict, dotted: str) -> Optional[float]:
+        node: object = tree
+        for part in dotted.split("/"):
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return float(node) if isinstance(node, (int, float)) else None
+
+    primary_p: Dict[str, float] = {}
+    primary_missing: List[str] = []
+    for path, claim in PRIMARY_ENDPOINTS:
+        val = _lookup(endpoint_tree, path)
+        if val is None:
+            primary_missing.append(path)
+        else:
+            primary_p[path] = val
+
+    # m is ALWAYS the pre-registered family size. If a run computes only a
+    # subset (e.g. --configs without exp7_baseline, or --no-pipeline-a), the
+    # correction stays at the full family and the run is simply under-powered
+    # for the family -- it does not silently get an easier threshold.
+    payload["primary_endpoints_not_computed"] = primary_missing
+    payload["primary_endpoints_family_size"] = len(PRIMARY_ENDPOINTS)
+    if primary_p:
+        holm = holm_bonferroni(primary_p, m_family=len(PRIMARY_ENDPOINTS))
+        for path, claim in PRIMARY_ENDPOINTS:
+            if path in holm:
+                holm[path]["claim"] = claim
+        payload["primary_endpoints_holm"] = holm
+        print("\n=== A5: pre-registered primary endpoints (Holm-Bonferroni) ===")
+        for path, rec in sorted(holm.items(), key=lambda kv: kv[1]["rank"]):
+            flag = "REJECT" if rec["reject_at_alpha"] else "  n.s."
+            print(
+                f"  [{flag}] p={rec['p_raw']:.5f} -> p_adj={rec['p_adjusted']:.5f} "
+                f"(rank {rec['rank']}/{rec['n_in_family']})  {path}"
+            )
+    if primary_missing:
+        print(
+            f"  [warn] {len(primary_missing)}/{len(PRIMARY_ENDPOINTS)} pre-registered "
+            f"endpoint(s) not computed in this run (config not selected?): "
+            f"{primary_missing}"
+        )
+        print("  [warn] Holm m stays at the full family size; do not quote these "
+              "adjusted p-values as the thesis result unless all 5 are present.")
+
     args.out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"\n[done] wrote {args.out}")
 
@@ -1931,6 +2638,7 @@ def main() -> None:
                 "n_permutation_macro_f1": int(args.n_perm_binary),
                 "ptbxl_subclass_csv": str(PTBXL_SUBCLASS_PATH.relative_to(REPO_ROOT)),
                 "ptbxl_features_npz": str(FEAT_PTBXL_PATH.relative_to(REPO_ROOT)),
+                "scaler_domain": args.scaler_domain,
                 "seed": SEED,
             },
             "results": cd_payload_results,
@@ -1965,6 +2673,11 @@ def main() -> None:
         for cfg, srcs in pipeline_a_results.items():
             pa_payload_results[cfg] = {}
             for src_name, leg in srcs.items():
+                # `paired_Z_vs_features` is a sibling of the two arms, not a
+                # third arm -- it has no best_C / per-endpoint scoring dict.
+                if src_name == "paired_Z_vs_features":
+                    pa_payload_results[cfg][src_name] = leg
+                    continue
                 pa_payload_results[cfg][src_name] = {
                     "best_C": leg["best_C"],
                     "cv_scores_per_C": leg["cv_scores_per_C"],
@@ -2002,6 +2715,7 @@ def main() -> None:
                 "n_bootstrap": int(args.n_boot),
                 "n_permutation_macro_f1": int(args.n_perm_binary),
                 "ptbxl_subclass_csv": str(PTBXL_SUBCLASS_PATH.relative_to(REPO_ROOT)),
+                "scaler_domain": args.scaler_domain,
                 "seed": SEED,
             },
             "results": pa_payload_results,
@@ -2034,6 +2748,25 @@ def main() -> None:
                 f"{fcd['macro_f1']:>6.3f} [{fcd['macro_f1_ci95'][0]:>5.3f},{fcd['macro_f1_ci95'][1]:>5.3f}]  "
                 f"{zcd2:>10.3f}  {fcd2:>12.3f}"
             )
+
+        # The paired test is the one that adjudicates "latent vs control".
+        # Printed separately because it compares the two columns above rather
+        # than adding a third arm, and because its null is not the label
+        # shuffle each arm was scored against.
+        print("\n=== Pipeline A paired latent-vs-control (delta = Z - control) ===")
+        print(f"{'config':<14}  {'endpoint':<16}  {'dF1':>8}  {'CI95':>18}  "
+              f"{'p_swap':>8}  {'n':>6}  {'disagree':>8}")
+        for cfg in configs:
+            for endpoint, d in pipeline_a_results[cfg].get(
+                    "paired_Z_vs_features", {}).items():
+                ci = d["delta_ci95"]
+                print(
+                    f"{cfg:<14}  {endpoint:<16}  "
+                    f"{d['delta_macro_f1_a_minus_b']:>+8.4f}  "
+                    f"[{ci[0]:>+7.4f},{ci[1]:>+7.4f}]  "
+                    f"{d['p_two_sided_paired_swap']:>8.4f}  "
+                    f"{d['n_rows']:>6d}  {d['n_disagree']:>8d}"
+                )
 
     # Pipeline B JSON + summary.
     if do_pipeline_b:
@@ -2081,6 +2814,7 @@ def main() -> None:
                 "n_bootstrap": int(args.n_boot),
                 "n_permutation_macro_f1": int(args.n_perm_binary),
                 "ptbxl_subclass_csv": str(PTBXL_SUBCLASS_PATH.relative_to(REPO_ROOT)),
+                "scaler_domain": args.scaler_domain,
                 "seed": SEED,
             },
             "results": pb_payload_results,

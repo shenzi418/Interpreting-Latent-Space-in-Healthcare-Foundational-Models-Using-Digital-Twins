@@ -12,7 +12,25 @@ from scipy import signal
 from scipy.signal import resample
 from torch.utils.data import Dataset
 
-class LVEF_12lead_cls_Dataset_Marta(Dataset): 
+# ---------------------------------------------------------------------------
+# WARNING — dead classes below carry a known lead-order bug.
+#
+# LVEF_12lead_cls_Dataset_Marta, LVEF_12lead_reg_Dataset, LVEF_1lead_cls_Dataset
+# and LVEF_1lead_reg_Dataset all declare
+#     input_leads = [..., 'aVR', 'aVF', 'aVL', ...]
+# and permute positions 4<->5. That declaration is WRONG for the MedalCare WFDB
+# files this repo produces (they are already in standard order), and applying it
+# transposes the inferior (aVF) and high-lateral (aVL) leads. See
+# reports/2026-08-10_lead_order_bug_diagnostic.md.
+#
+# None of these four is referenced anywhere outside this file, and none is in
+# DATASET_REGISTRY, so they are not fixed here — fixing untested dead code is
+# how you get untested live code. If you ever revive one, port the
+# `_reorder_leads(signal, meta['sig_name'])` approach from
+# LVEF_12lead_cls_Dataset / PTBXLDataset first.
+# ---------------------------------------------------------------------------
+
+class LVEF_12lead_cls_Dataset_Marta(Dataset):
     def __init__(self, ecg_path, labels_df, transform=None):
         """
         Args:
@@ -77,6 +95,7 @@ class LVEF_12lead_cls_Dataset(Dataset):
         include_theta: bool = False,
         theta_config: Optional[Path] = None,
         theta_stats: Optional[Path] = None,
+        per_lead_norm: bool = True,
     ):
         """
         Args:
@@ -86,13 +105,41 @@ class LVEF_12lead_cls_Dataset(Dataset):
                 - 'wfdb_path': Path to WFDB file (without .hea/.dat extension)
                 - 'label_0' to 'label_7': One-hot encoded labels (8 binary columns)
             transform (callable, optional): Optional transform to be applied on a sample.
+            per_lead_norm (bool): z-score each lead independently (matches
+                PTBXLDataset). False reproduces the legacy single-global-scalar
+                normalisation, for ablation only.
         """
         self.labels_df = labels_df
         self.transform = transform
         self.ecg_path = ecg_path
-        self.input_leads = ['I', 'II', 'III', 'aVR', 'aVF', 'aVL', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
-        self.new_leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
-        self.lead_indices = [self.input_leads.index(lead) for lead in self.new_leads]
+        # Target lead order — the standard clinical order that ECGFounder was
+        # pretrained on, and the order PTBXLDataset.TARGET_LEADS produces.
+        #
+        # FIXED 2026-08-10. This class previously declared the WFDB source order
+        # as [..., 'aVR', 'aVF', 'aVL', ...] and permuted positions 4<->5 to
+        # reach the target. That declaration was WRONG: prepare_medalcare.py:53
+        # writes the WFDB files in standard order already (aVL before aVF), and
+        # the manifest's `lead_order` column agrees. Verified empirically via
+        # the exact limb-lead identities (aVL=(I-III)/2, aVF=(II+III)/2) on 6
+        # records — channel 4 IS aVL, channel 5 IS aVF.
+        #
+        # The consequence of the old code was that every MedalCare batch ever
+        # fed to ECGFounder had the inferior (aVF) and high-lateral (aVL) leads
+        # transposed, while PTB-XL — which reindexes by sig_name — did not.
+        # See reports/2026-08-10_lead_order_bug_diagnostic.md.
+        #
+        # We now reindex by `sig_name` exactly as PTBXLDataset._reorder_leads
+        # does, so the on-disk order is irrelevant and a mismatch fails loudly
+        # rather than silently corrupting the frontal plane.
+        self.target_leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF',
+                             'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        # Per-lead z-score matches PTBXLDataset._z_score. The historical
+        # MedalCare behaviour was a single GLOBAL scalar mean/std over the whole
+        # (12, T) array, which is a different normalisation convention from the
+        # one applied to the real domain — a second, independent source of
+        # synthetic-vs-real mismatch. Set per_lead_norm=False to reproduce the
+        # legacy behaviour for ablation.
+        self.per_lead_norm = per_lead_norm
         self.include_metadata = include_metadata
         self.domain_column = domain_column
         self.domain_map = domain_map
@@ -123,8 +170,41 @@ class LVEF_12lead_cls_Dataset(Dataset):
     def __len__(self):
         return len(self.labels_df)
 
-    def z_score_normalization(self,signal):
-        return (signal - np.mean(signal)) / (np.std(signal) +1e-8) 
+    def z_score_normalization(self, signal):
+        """z-score the (leads, time) signal.
+
+        per_lead_norm=True  -> per-lead mean/std, matching PTBXLDataset._z_score.
+        per_lead_norm=False -> legacy single global scalar over the whole array.
+        """
+        if self.per_lead_norm:
+            mean = signal.mean(axis=1, keepdims=True)
+            std = signal.std(axis=1, keepdims=True)
+            return (signal - mean) / (std + 1e-8)
+        return (signal - np.mean(signal)) / (np.std(signal) + 1e-8)
+
+    def _reorder_leads(self, signal: np.ndarray, source_leads) -> np.ndarray:
+        """Reindex (leads, time) to self.target_leads using WFDB `sig_name`.
+
+        Mirrors PTBXLDataset._reorder_leads. Fails loudly rather than silently
+        permuting the frontal plane — see the FIXED note in __init__.
+        """
+        if source_leads is None or len(source_leads) == 0:
+            raise ValueError(
+                "MedalCare WFDB metadata did not include lead names (sig_name "
+                "missing). Lead order cannot be verified; refusing to guess. "
+                "Regenerate the WFDB files with scripts/prepare_medalcare.py."
+            )
+        name_to_idx = {str(name).upper(): idx for idx, name in enumerate(source_leads)}
+        ordered = []
+        for lead in self.target_leads:
+            key = lead.upper()
+            if key not in name_to_idx:
+                raise ValueError(
+                    f"Lead '{lead}' missing from MedalCare WFDB record. "
+                    f"Record declares: {list(source_leads)}"
+                )
+            ordered.append(signal[name_to_idx[key]])
+        return np.stack(ordered, axis=0)
 
     def check_nan_in_array(self, arr):
         contains_nan = np.isnan(arr).any()
@@ -168,9 +248,12 @@ class LVEF_12lead_cls_Dataset(Dataset):
         if result != 0:
             print(f"[WARN] NaN values found in {full_path}")
         
-        data = data.squeeze(0) 
+        data = data.squeeze(0)
         data = np.transpose(data, (1, 0))  # Transpose to (leads, time)
-        data = data[self.lead_indices, :]  # Reorder leads
+        # Reorder leads by NAME (sig_name), not by a hardcoded index list.
+        # See the FIXED note in __init__ — the old positional permutation
+        # transposed aVL/aVF on every MedalCare record.
+        data = self._reorder_leads(data, meta.get("sig_name", []))
         signal = self.z_score_normalization(data)
         signal = torch.FloatTensor(signal)
 

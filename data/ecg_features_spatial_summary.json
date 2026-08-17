@@ -1,0 +1,61 @@
+[
+  {
+    "n_processed": 5347,
+    "n_ok": 3711,
+    "ok_rate": 0.6940340377781934,
+    "rows_with_complete_block": {
+      "ST_J60": 5283,
+      "Q_amp": 5277,
+      "R_amp": 5319,
+      "T_amp": 5285,
+      "global6": 3711
+    },
+    "failure_reasons": {
+      "some_features_nan": 1608,
+      "fewer_than_2_R_peaks": 23,
+      "nk_pipeline_failed:ValueError": 5
+    },
+    "dataset": "medalcare",
+    "split": "train",
+    "n_total_rows": 12019
+  },
+  {
+    "n_processed": 1200,
+    "n_ok": 701,
+    "ok_rate": 0.5841666666666666,
+    "rows_with_complete_block": {
+      "ST_J60": 1191,
+      "Q_amp": 1179,
+      "R_amp": 1194,
+      "T_amp": 1192,
+      "global6": 701
+    },
+    "failure_reasons": {
+      "some_features_nan": 493,
+      "fewer_than_2_R_peaks": 5,
+      "nk_pipeline_failed:ValueError": 1
+    },
+    "dataset": "medalcare",
+    "split": "test",
+    "n_total_rows": 2386
+  },
+  {
+    "n_processed": 550,
+    "n_ok": 399,
+    "ok_rate": 0.7254545454545455,
+    "rows_with_complete_block": {
+      "ST_J60": 548,
+      "Q_amp": 549,
+      "R_amp": 549,
+      "T_amp": 548,
+      "global6": 399
+    },
+    "failure_reasons": {
+      "some_features_nan": 150,
+      "nk_pipeline_failed:ValueError": 1
+    },
+    "dataset": "ptbxl",
+    "split": "test (fold 10)",
+    "n_total_rows": 2198
+  }
+]

@@ -187,6 +187,32 @@ def plot_pca_class_domain_overlay(Z_medal, Y_medal, Z_ptb, Y_ptb, outdir: Path, 
 # Domain Alignment Metrics
 # ---------------------------------------------------------------------------
 
+# m6 fix: analysis/eval_tier2.py emits keys with the SAME NAMES ("mmd_rbf",
+# "knn_mixing") computed from DIFFERENT estimators. Neither is wrong; they are
+# not comparable, and a table mixing the two is meaningless. Each script now
+# ships its own spec inside its payload so the mismatch cannot be lost when a
+# table is assembled downstream.
+ALIGNMENT_METRIC_SPEC: Dict = {
+    "c2st_auc": {
+        "estimator": "LogisticRegression(C=1.0, max_iter=500)",
+        "cv": "StratifiedKFold(5, shuffle=True)",
+        "scaler": "fit per-fold on training rows only (m7)",
+    },
+    "mmd": {
+        "estimator": "UNBIASED MMD^2 (diagonal removed from Kxx and Kyy)",
+        "bandwidth": "median heuristic: sigma = sqrt(median(d2)/2), gamma = 1/(2*sigma^2)",
+        "subsample": "2000 global / 1000 per-class, applied by the caller",
+        "not_comparable_with": "analysis/eval_tier2.py:_mmd_rbf (BIASED, subsample 1024, different bandwidth convention)",
+    },
+    "knn_mixing": {
+        "k": 15,
+        "metric": "cosine",
+        "subsample": "2000 global / 1000 per-class, applied by the caller",
+        "not_comparable_with": "analysis/eval_tier2.py:_knn_mixing (k=10, euclidean, subsample 1024)",
+    },
+}
+
+
 def mmd_rbf(X: np.ndarray, Y: np.ndarray, sigma: float = None) -> float:
     """Unbiased MMD^2 estimate with RBF kernel (median heuristic for bandwidth)."""
     from scipy.spatial.distance import cdist
@@ -223,26 +249,41 @@ def knn_mixing_score(X: np.ndarray, Y: np.ndarray, k: int = 15) -> float:
 
 
 def domain_classifier_auc(X: np.ndarray, Y: np.ndarray, seed: int = 42) -> float:
-    """C2ST: 5-fold CV domain classifier AUC. 0.5 = domains indistinguishable."""
+    """C2ST: 5-fold CV domain classifier AUC. 0.5 = domains indistinguishable.
+
+    m7 fix: the StandardScaler used to be fit on the whole pooled array before
+    the CV split, so each fold's held-out rows contributed their own mean and
+    variance to the transform that was applied to them. For a domain classifier
+    that leak is directly on-target -- the per-feature means are exactly what
+    separates the two domains -- and it inflates C2ST. The scaler is now fit
+    inside the fold on training rows only.
+    """
     XY = np.vstack([X, Y])
     labels = np.array([0] * len(X) + [1] * len(Y))
-    scaler = StandardScaler()
-    XY_sc = scaler.fit_transform(XY)
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
     aucs = []
-    for train_idx, test_idx in skf.split(XY_sc, labels):
+    for train_idx, test_idx in skf.split(XY, labels):
+        scaler = StandardScaler().fit(XY[train_idx])
+        Xtr = scaler.transform(XY[train_idx])
+        Xte = scaler.transform(XY[test_idx])
         clf = LogisticRegression(max_iter=500, C=1.0, solver="lbfgs", random_state=seed)
-        clf.fit(XY_sc[train_idx], labels[train_idx])
-        prob = clf.predict_proba(XY_sc[test_idx])[:, 1]
+        clf.fit(Xtr, labels[train_idx])
+        prob = clf.predict_proba(Xte)[:, 1]
         aucs.append(roc_auc_score(labels[test_idx], prob))
     return float(np.mean(aucs))
 
 
 def compute_domain_alignment(Z_medal, Z_ptb, Y_medal, Y_ptb, seed: int) -> Dict:
     """Compute global and per-class domain alignment metrics."""
-    results = {}
+    results = {"metric_spec": ALIGNMENT_METRIC_SPEC}
 
+    # Global per-feature standardisation, fit on the pooled array. This is the
+    # SAME affine map for both domains and every row, so it is preprocessing
+    # rather than fold leakage -- the per-fold leak that mattered lived inside
+    # domain_classifier_auc and is fixed there (m7). Retained pooled because
+    # fitting it on one domain would put the other domain off-centre by
+    # construction and bias every metric below in a known direction.
     scaler = StandardScaler()
     Z_all = np.vstack([Z_medal, Z_ptb])
     scaler.fit(Z_all)

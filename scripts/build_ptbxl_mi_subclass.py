@@ -383,7 +383,9 @@ def main() -> None:
         "prob_threshold": args.prob_threshold,
         "strong_threshold": args.strong_threshold,
     }
-    summary_path = args.out.with_name("ptbxl_mi_subclass_summary.json")
+    # Track --out, not a fixed name: building a second fold selection to a
+    # different CSV used to silently clobber the first build's summary.
+    summary_path = args.out.with_name(f"{args.out.stem}_summary.json")
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"\nSummary -> {summary_path}")
 

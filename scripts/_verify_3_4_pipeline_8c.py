@@ -118,8 +118,11 @@ def check_file(tag: str, path: Path) -> list[str]:
         issues.append(f"{tag}: medalcare test 8c counts mismatch")
     if meta["n_bootstrap"] != 1000:
         issues.append(f"{tag}: n_bootstrap != 1000")
-    if meta["n_permutation_macro_f1"] != 200:
-        issues.append(f"{tag}: n_permutation_macro_f1 != 200")
+    # Permutation budget was raised 200 -> 10000 after `inlp` was generated.
+    exp_perm = 200 if tag == "inlp" else 10000
+    if meta["n_permutation_macro_f1"] != exp_perm:
+        issues.append(f"{tag}: n_permutation_macro_f1 != {exp_perm} "
+                      f"({meta['n_permutation_macro_f1']})")
 
     for cfg in EXPECTED_CONFIGS[tag]:
         if cfg not in data["results"]:

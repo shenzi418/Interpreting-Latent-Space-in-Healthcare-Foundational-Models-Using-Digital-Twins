@@ -45,7 +45,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from net1d import Net1D, MultiHeadECGFounder
-from scripts.datasets import get_dataset
+from scripts.datasets import PTBXLDataset, get_dataset
 
 DEFAULT_PTBXL_ROOT = (
     REPO_ROOT
@@ -79,8 +79,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to fine-tuned checkpoint (.pt/.pth).",
     )
     p.add_argument(
-        "--model-type", choices=["single", "multi"], required=True,
-        help="'single' = Net1D, 'multi' = MultiHeadECGFounder.",
+        "--model-type", choices=["single", "multi", "auto"], required=True,
+        help="'single' = Net1D, 'multi' = MultiHeadECGFounder, 'auto' = decide from "
+             "the checkpoint's own keys. Prefer 'auto' in batch drivers: passing "
+             "'single' for a dual-head checkpoint fails with a misleading "
+             "\"Cannot infer n_classes\" error rather than saying the model type "
+             "is wrong.",
     )
     p.add_argument(
         "--use-adapter", action="store_true",
@@ -108,6 +112,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--device", type=str, default=None)
+    p.add_argument(
+        "--global-z", action="store_true",
+        help="MedalCare only: use the legacy single global scalar z-score instead of "
+             "the per-lead z-score. Must match how the checkpoint was TRAINED "
+             "(pass this iff the run was trained with finetune_multilabel --global-z).",
+    )
     return p.parse_args()
 
 
@@ -122,6 +132,30 @@ def _load_state_dict(checkpoint_path: Path, device: torch.device) -> dict:
     if isinstance(ckpt, dict):
         return ckpt
     raise ValueError(f"Unsupported checkpoint format in {checkpoint_path}")
+
+
+def _resolve_model_type(sd: dict, model_type: str) -> str:
+    """Decide 'single' vs 'multi' from the checkpoint's own key layout.
+
+    `ft_multihead_ECGFounder` saves the trunk under `backbone.*` with separate
+    `head_medal.*` / `head_ptb.*` classifiers, so a dual-head checkpoint has no
+    top-level `dense.weight`. A caller that passes `--model-type single` for one
+    gets "Cannot infer n_classes: 'dense.weight' not in checkpoint" -- which
+    reads like a corrupt checkpoint rather than the wrong flag, and cost the
+    `exp8_leadfix_dual` arm its entire latent export on 2026-08-11.
+    """
+    if model_type != "auto":
+        return model_type
+    if "head_medal.weight" in sd and "head_ptb.weight" in sd:
+        return "multi"
+    if "dense.weight" in sd:
+        return "single"
+    raise ValueError(
+        "--model-type auto could not classify this checkpoint: it has neither "
+        "top-level 'dense.weight' (single) nor 'head_medal.weight' + "
+        f"'head_ptb.weight' (multi). Head-like keys present: "
+        f"{[k for k in sd if 'dense' in k or 'head' in k][:8]}"
+    )
 
 
 def _infer_n_classes(sd: dict, model_type: str, dataset: str) -> int:
@@ -181,6 +215,7 @@ def make_loader(
     batch_size: int,
     num_workers: int,
     device: torch.device,
+    per_lead_norm: bool = True,
 ) -> Tuple[DataLoader, int]:
     if dataset_name == "ptbxl":
         ds = get_dataset("ptbxl", root=ptbxl_root, split=split,
@@ -189,7 +224,10 @@ def make_loader(
         df = pd.read_csv(manifest_path)
         if "split" in df.columns and split != "all":
             df = df[df["split"].str.lower() == split.lower()].copy()
-        ds = get_dataset("medalcare", ecg_path="", labels_df=df)
+        # per_lead_norm must MATCH the normalisation the checkpoint was trained
+        # under, or the exported latents are off-distribution for that model.
+        ds = get_dataset("medalcare", ecg_path="", labels_df=df,
+                         per_lead_norm=per_lead_norm)
 
     loader = DataLoader(
         ds,
@@ -250,11 +288,14 @@ def main() -> None:
 
     # Load state dict once
     sd = _load_state_dict(args.checkpoint, device)
-    n_classes = _infer_n_classes(sd, args.model_type, args.dataset)
+    model_type = _resolve_model_type(sd, args.model_type)
+    if model_type != args.model_type:
+        print(f"Model type: resolved 'auto' -> '{model_type}' from checkpoint keys")
+    n_classes = _infer_n_classes(sd, model_type, args.dataset)
     print(f"Inferred n_classes = {n_classes}")
 
     # Build model
-    if args.model_type == "single":
+    if model_type == "single":
         model = build_single_head(sd, device, n_classes, args.use_adapter)
     else:
         model = build_multi_head(sd, device, args.use_adapter)
@@ -264,11 +305,12 @@ def main() -> None:
     loader, n_samples = make_loader(
         args.dataset, args.split, args.ptbxl_root, args.manifest,
         args.batch_size, args.num_workers, device,
+        per_lead_norm=not args.global_z,
     )
     print(f"Samples: {n_samples}")
 
     # Extract
-    Z, P, Y = extract(model, loader, device, args.model_type, task)
+    Z, P, Y = extract(model, loader, device, model_type, task)
     print(f"Shapes — Z: {Z.shape}, P: {P.shape}, Y: {Y.shape}")
 
     if Z.shape[0] != n_samples:
@@ -276,6 +318,24 @@ def main() -> None:
 
     # Assemble NPZ payload
     payload = {"Z": Z, "P": P, "Y": Y}
+
+    # For PTB-XL, record the record IDs in export order. Every downstream join
+    # (MI-subclass CSV, hand-crafted feature .npz) is POSITIONAL, so without this
+    # a mismatched fold selection can only be caught by row count. Older exports
+    # predate the key, so consumers must treat it as optional.
+    if args.dataset == "ptbxl":
+        db = pd.read_csv(args.ptbxl_root / "ptbxl_database.csv")
+        folds = PTBXLDataset.OFFICIAL_SPLITS[args.split]
+        ids = (
+            db[db["strat_fold"].isin(list(folds))]
+            .reset_index(drop=True)["ecg_id"]
+            .to_numpy(dtype=np.int64)
+        )
+        if ids.shape[0] == Z.shape[0]:
+            payload["ecg_id"] = ids
+        else:
+            print(f"[WARN] ecg_id count {ids.shape[0]} != Z rows {Z.shape[0]}; "
+                  f"omitting ecg_id rather than writing a misaligned key")
 
     # For MedalCare, include theta columns from manifest if present
     if args.dataset == "medalcare":

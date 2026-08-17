@@ -96,6 +96,7 @@ from analysis.phase_b2_infarct_decoding import (  # noqa: E402
     fit_ridge_continuous,
     fit_ridge_phi,
     load_targets,
+    derive_rng,
 )
 
 
@@ -107,10 +108,18 @@ DEFAULT_KS: Tuple[int, ...] = (1024, 512, 256, 128, 64, 32, 16, 8)
 DEFAULT_CONFIGS: Tuple[str, ...] = ("exp7_baseline", "exp7_ccmmd")
 DEFAULT_PCA_MODES: Tuple[str, ...] = ("combined", "medalcare", "ptbxl")
 
-# Reduced permutation budget for the sweep -- central R^2/AUC drive K*.
-SCAN_N_BOOT = 200
-SCAN_N_PERM = 50
-SCAN_N_PERM_BINARY = 30
+# Permutation budget for the sweep. Central R^2/AUC drive K*, and the sweep is
+# 8 Ks x 2 configs x 3 PCA modes, so the p-values here are exploratory by
+# construction and are NOT part of the pre-registered primary endpoint family
+# (see PRIMARY_ENDPOINTS in analysis/phase_b2_infarct_decoding.py).
+#
+# A5 fix: the old budgets (50 / 30) put the p-value floor at 1/51 = 0.0196 and
+# 1/31 = 0.0323. Reported to 4 dp those floors look like real p-values but
+# cannot resolve anything below them, and they survive no multiplicity
+# correction at all. Raised so a floor-valued p is at least unambiguous.
+SCAN_N_BOOT = 500
+SCAN_N_PERM = 1000
+SCAN_N_PERM_BINARY = 500
 SUBSAMPLE_ALIGNMENT = 2000  # max per domain for MMD/C2ST/kNN
 SEED = 42
 
@@ -122,6 +131,14 @@ CONFIG_LATENT_STEMS: Dict[str, str] = {
     "exp7_ccmmd": "exp7_ccmmd",
     "exp5_3class": "exp5_3class",
     "exp6_3class": "exp6_3class",
+    # Stage 3 of the 2026-08-10 audit: retrained under the lead-order and
+    # PTB-XL-filter fixes. These export with an explicit `_test` suffix; see
+    # `_resolve_split_dir`.
+    "exp8_leadfix_baseline": "exp8_leadfix_baseline",
+    "exp8_leadfix_ccmmd": "exp8_leadfix_ccmmd",
+    "exp8_leadfix_dual": "exp8_leadfix_dual",
+    "exp8_leadfix_globalz": "exp8_leadfix_globalz",
+    "exp8_leadfix_K64": "exp8_leadfix_K64",
 }
 
 LATENT_ROOT = REPO_ROOT / "outputs" / "latents"
@@ -136,6 +153,27 @@ def _load_npz(path: Path) -> Dict[str, np.ndarray]:
         return {k: data[k] for k in data.keys()}
 
 
+def _resolve_split_dir(stem: str, domain: str, split: str) -> Path:
+    """Locate a latent export directory under either naming convention.
+
+    The exp5/6/7 exports drop the `_test` suffix on the test split
+    (`exp7_medalcare`) while carrying it on train/val (`exp7_medalcare_train`).
+    The Stage-3 `exp8_leadfix_*` exports are uniform (`..._medalcare_test`).
+    Try the explicit form first, then the bare one, and fail with both
+    candidates listed rather than a bare "missing latents".
+    """
+    candidates = [LATENT_ROOT / f"{stem}_{domain}_{split}"]
+    if split == "test":
+        candidates.append(LATENT_ROOT / f"{stem}_{domain}")
+    for cand in candidates:
+        if (cand / "latents.npz").exists():
+            return cand / "latents.npz"
+    raise FileNotFoundError(
+        f"missing latents for stem={stem!r} domain={domain!r} split={split!r}; "
+        f"tried: {[str(c) for c in candidates]}"
+    )
+
+
 def load_config_4splits(config: str) -> Dict[str, Dict[str, np.ndarray]]:
     """Load Z/Y for {medal_train, medal_test, ptb_train, ptb_test}.
 
@@ -143,15 +181,13 @@ def load_config_4splits(config: str) -> Dict[str, Dict[str, np.ndarray]]:
     """
     stem = CONFIG_LATENT_STEMS[config]
     splits = {
-        "medal_train": LATENT_ROOT / f"{stem}_medalcare_train" / "latents.npz",
-        "medal_test":  LATENT_ROOT / f"{stem}_medalcare"       / "latents.npz",
-        "ptb_train":   LATENT_ROOT / f"{stem}_ptbxl_train"     / "latents.npz",
-        "ptb_test":    LATENT_ROOT / f"{stem}_ptbxl"           / "latents.npz",
+        "medal_train": _resolve_split_dir(stem, "medalcare", "train"),
+        "medal_test":  _resolve_split_dir(stem, "medalcare", "test"),
+        "ptb_train":   _resolve_split_dir(stem, "ptbxl", "train"),
+        "ptb_test":    _resolve_split_dir(stem, "ptbxl", "test"),
     }
     out: Dict[str, Dict[str, np.ndarray]] = {}
     for name, path in splits.items():
-        if not path.exists():
-            raise FileNotFoundError(f"missing latents: {path}")
         d = _load_npz(path)
         out[name] = {"Z": d["Z"].astype(np.float64), "Y": d["Y"].astype(np.float32)}
     return out
@@ -485,7 +521,7 @@ def run_one(
     *,
     seed: int,
 ) -> Dict[str, object]:
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed)  # fallback; rebound per-K below (m10)
     print(f"\n{'='*70}\n[CONFIG {config} / PCA {pca_mode}]\n{'='*70}")
     Z_m_tr = splits["medal_train"]["Z"]
     Z_m_te = splits["medal_test"]["Z"]
@@ -533,6 +569,9 @@ def run_one(
             print(f"[skip] K={k} > n_components_={pca.n_components_}")
             continue
         tk0 = time.time()
+        # m10 fix: RNG keyed on the identity of this cell, so a K's numbers do
+        # not depend on which other Ks / configs / PCA modes ran first.
+        rng = derive_rng(config, pca_mode, k, seed=seed)
         Z_m_te_k = Z_m_te_v_full[:, :k]
         Z_p_te_k = Z_p_te_v_full[:, :k]
         Z_m_tr_mi_k = Z_m_tr_mi_full[:, :k]

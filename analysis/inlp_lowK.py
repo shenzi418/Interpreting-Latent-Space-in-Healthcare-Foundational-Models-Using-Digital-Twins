@@ -71,6 +71,7 @@ from analysis.inlp_alignment import (  # noqa: E402
     apply_alignment,
     compute_alignment_metrics,
     plot_pca_before_after,
+    random_projection_control,
 )
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,37 @@ def fit_one_K(K: int, *, pool_mode: str, output_suffix: str, max_iter: int) -> D
         f"knn_mix={metrics_inlp_pool['knn_mixing']:.4f}"
     )
 
+    # ---- A4 control: rank-matched random projection -------------------------
+    # INLP removed (D - rank) directions. How much of the change above is the
+    # targeted removal of domain information, and how much is just having fewer
+    # dimensions? A random projector of the SAME rank removes the same capacity
+    # and nothing domain-specific, so it isolates the two.
+    final_rank = int(np.linalg.matrix_rank(P_total))
+    P_rand = random_projection_control(D, final_rank, seed=SEED)
+    Z_pool_rand = Z_scaled @ P_rand
+    metrics_rand_pool = compute_alignment_metrics(
+        Z_pool_rand[domain == 0], Z_pool_rand[domain == 1], seed=SEED,
+    )
+    print(
+        f"[rand ctrl] rank={final_rank}/{D}  "
+        f"c2st={metrics_rand_pool['c2st_auroc']:.4f} "
+        f"mmd={metrics_rand_pool['mmd_rbf']:.4e} "
+        f"knn_mix={metrics_rand_pool['knn_mixing']:.4f}"
+    )
+    delta_c2st_inlp = metrics_inlp_pool["c2st_auroc"] - metrics_orig_pool["c2st_auroc"]
+    delta_c2st_rand = metrics_rand_pool["c2st_auroc"] - metrics_orig_pool["c2st_auroc"]
+    print(
+        f"[rand ctrl] dC2ST: INLP={delta_c2st_inlp:+.4f}  "
+        f"random={delta_c2st_rand:+.4f}  "
+        f"INLP-specific={delta_c2st_inlp - delta_c2st_rand:+.4f}"
+    )
+    if abs(delta_c2st_inlp - delta_c2st_rand) < 0.01:
+        print(
+            "[rand ctrl] WARNING: INLP is within 0.01 C2ST of a random projection "
+            "of equal rank -- at this K the effect is capacity loss, NOT targeted "
+            "removal of domain structure. Do not report it as the latter."
+        )
+
     # Save projection + scaler
     proj_subdir = (
         stem_for_K(K) if output_suffix == "_inlp"
@@ -257,8 +289,15 @@ def fit_one_K(K: int, *, pool_mode: str, output_suffix: str, max_iter: int) -> D
             "seed": int(SEED),
             "n_iter_run": int(n_iter_run),
             "ptp_residual": float(residual),
+            "final_rank_P_total": int(final_rank),
+            "ambient_dim": int(D),
+            "converged": bool(iteration_log[-1].get("converged", False)),
             "metrics_orig_pool": metrics_orig_pool,
             "metrics_inlp_pool": metrics_inlp_pool,
+            "metrics_rand_control_pool": metrics_rand_pool,
+            "delta_c2st_inlp": float(delta_c2st_inlp),
+            "delta_c2st_rand_control": float(delta_c2st_rand),
+            "delta_c2st_inlp_specific": float(delta_c2st_inlp - delta_c2st_rand),
             "metrics_orig_test": metrics_orig_test,
             "metrics_inlp_test": metrics_inlp_test,
             "iterations": iteration_log,
@@ -283,6 +322,13 @@ def fit_one_K(K: int, *, pool_mode: str, output_suffix: str, max_iter: int) -> D
         "n_iter_run": int(n_iter_run),
         "metrics_orig_pool": metrics_orig_pool,
         "metrics_inlp_pool": metrics_inlp_pool,
+        "metrics_rand_control_pool": metrics_rand_pool,
+        "final_rank_P_total": int(final_rank),
+        "ambient_dim": int(D),
+        "converged": bool(iteration_log[-1].get("converged", False)),
+        "delta_c2st_inlp": float(delta_c2st_inlp),
+        "delta_c2st_rand_control": float(delta_c2st_rand),
+        "delta_c2st_inlp_specific": float(delta_c2st_inlp - delta_c2st_rand),
         "metrics_orig_test": metrics_orig_test,
         "metrics_inlp_test": metrics_inlp_test,
         "saved_splits": saved,
@@ -341,21 +387,47 @@ def main() -> int:
 
     # Pretty table
     print()
-    print("=" * 88)
+    print("=" * 104)
     print(
-        f"{'key':<12s} {'n_iter':>6s} {'C2ST_orig':>10s} {'C2ST_inlp':>10s}  "
-        f"{'MMD_orig':>10s} {'MMD_inlp':>10s}  {'TST_c2st_o':>11s} {'TST_c2st_i':>11s}"
+        f"{'key':<12s} {'n_iter':>6s} {'rank/D':>10s} {'conv':>5s} "
+        f"{'C2ST_orig':>10s} {'C2ST_inlp':>10s} {'C2ST_rand':>10s} {'INLP-spec':>10s}  "
+        f"{'MMD_orig':>10s} {'MMD_inlp':>10s}"
     )
-    print("=" * 88)
+    print("=" * 104)
+    stale = []
     for k, r in summary.items():
+        # `summary` is MERGED from any pre-existing file, so it can carry entries
+        # written by an older version of this script -- and, more seriously, by a
+        # run that predates the 2026-08-10 lead-order/normalisation fixes. Those
+        # numbers are provisional and must not be tabulated beside fresh ones as
+        # if they were comparable. Entries lacking the random control are exactly
+        # the pre-control-feature ones, so use that as the staleness marker
+        # rather than crashing on the missing key.
+        if not (isinstance(r, dict) and "metrics_rand_control_pool" in r):
+            stale.append(k)
+            continue
         m0 = r["metrics_orig_pool"]; m1 = r["metrics_inlp_pool"]
-        t0 = r["metrics_orig_test"]; t1 = r["metrics_inlp_test"]
+        mr = r["metrics_rand_control_pool"]
         print(
             f"{k:<12s} {r['n_iter_run']:>6d} "
-            f"{m0['c2st_auroc']:>10.4f} {m1['c2st_auroc']:>10.4f}  "
-            f"{m0['mmd_rbf']:>10.3e} {m1['mmd_rbf']:>10.3e}  "
-            f"{t0['c2st_auroc']:>11.4f} {t1['c2st_auroc']:>11.4f}"
+            f"{r['final_rank_P_total']:>4d}/{r['ambient_dim']:<5d} "
+            f"{str(r['converged']):>5s} "
+            f"{m0['c2st_auroc']:>10.4f} {m1['c2st_auroc']:>10.4f} "
+            f"{mr['c2st_auroc']:>10.4f} {r['delta_c2st_inlp_specific']:>+10.4f}  "
+            f"{m0['mmd_rbf']:>10.3e} {m1['mmd_rbf']:>10.3e}"
         )
+    if stale:
+        print(
+            f"\n[warn] omitted {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} "
+            f"({', '.join(stale)}) written by an earlier version of this script. "
+            "They carry no random control and may predate the 2026-08-10 lead-order "
+            "and per-lead-normalisation fixes, so they are NOT comparable to the "
+            "rows above. Delete the summary JSON and re-run to regenerate them."
+        )
+    print(
+        "\n'INLP-spec' = (C2ST_inlp - C2ST_orig) - (C2ST_rand - C2ST_orig). "
+        "Near zero => the effect is capacity loss, not domain-directed removal."
+    )
     print(f"\nWrote {summary_path.relative_to(REPO_ROOT)}")
     return 0
 

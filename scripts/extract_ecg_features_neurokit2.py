@@ -38,7 +38,7 @@ import json
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -54,6 +54,12 @@ import neurokit2 as nk  # noqa: E402  (after warning filters)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from scripts.medalcare_paths import is_mi_path  # noqa: E402
 
 DEFAULT_MEDAL_MANIFEST = REPO_ROOT / "data" / "medalcare_filtered_manifest_dataset_split.csv"
 DEFAULT_PTBXL_ROOT = (
@@ -211,10 +217,15 @@ def load_medalcare_split_rows(manifest_path: Path, split: str) -> pd.DataFrame:
     return sub
 
 
-def load_ptbxl_test_rows(ptbxl_root: Path) -> pd.DataFrame:
-    """Return PTB-XL test fold DataFrame in latent-export order."""
+def load_ptbxl_test_rows(ptbxl_root: Path, folds: Sequence[int] = (10,)) -> pd.DataFrame:
+    """Return PTB-XL rows for `folds` in latent-export order.
+
+    Default (10,) is the official test split. The filter expression must stay
+    byte-identical to `PTBXLDataset` and `build_ptbxl_mi_subclass.py` — the row
+    order of every downstream .npz depends on it.
+    """
     db = pd.read_csv(ptbxl_root / "ptbxl_database.csv")
-    sub = db[db["strat_fold"] == 10].reset_index(drop=True)
+    sub = db[db["strat_fold"].isin(list(folds))].reset_index(drop=True)
     return sub
 
 
@@ -264,9 +275,7 @@ def process_medalcare(
 ) -> Dict[str, object]:
     df = load_medalcare_split_rows(manifest, split)
     n_total = len(df)
-    is_mi = df["original_csv_path"].apply(
-        lambda p: "/mi/" in str(p).replace("\\", "/").lower()
-    ).to_numpy()
+    is_mi = df["original_csv_path"].apply(is_mi_path).to_numpy()
     mi_idx = np.flatnonzero(is_mi)
     if limit is not None:
         mi_idx = mi_idx[:limit]

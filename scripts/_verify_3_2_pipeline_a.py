@@ -34,8 +34,36 @@ TERRITORIES_4C = ["Anteroseptal", "Anterolateral", "Inferior", "Inferolateral"]
 TERRITORIES_2C = ["Anterior", "Inferior"]
 EXPECTED_PTBXL_4C = {"Anteroseptal": 168, "Anterolateral": 42, "Inferior": 196, "Inferolateral": 32}
 EXPECTED_PTBXL_2C = {"Anterior": 210, "Inferior": 228}
-EXPECTED_MEDAL_TRAIN_4C = {"Anteroseptal": 1799, "Anterolateral": 850, "Inferior": 1798, "Inferolateral": 900}
-EXPECTED_MEDAL_TEST_4C = {"Anteroseptal": 400, "Anterolateral": 200, "Inferior": 400, "Inferolateral": 200}
+
+# MedalCare territory counts depend on WHICH label rule the artifact was built
+# under, so they cannot be a single global constant.
+#
+#   phi   -- territory_4c derived from isch[0].phi (the "D1 fix",
+#            scripts/build_medalcare_isch_targets.py:120-143). Current rule.
+#   folder-- territory_4c copied from the MedalCare-XL folder name. Superseded.
+#
+# The two disagree on exactly one bucket: MedalCare-XL's own parameter files put
+# LCX_0.3_post in the positive-phi wedge, the same wedge as LCX_0.3_ant. Verified
+# 2026-08-11 by reading isch[0].phi out of the raw
+# WP2_largeDataset_ParameterFiles/mi/LCX_0.3_post/*/run_S62/*Ventricular*.txt
+# (+2.03, +2.27, +2.64 rad). So 450 train / 100 val / 100 test rows move
+# Inferolateral -> Anterolateral. phi wins: the folder name contradicts the
+# geometry the simulator was actually given.
+MEDAL_4C = {
+    "phi":    {"train": {"Anteroseptal": 1799, "Anterolateral": 1300, "Inferior": 1798, "Inferolateral": 450},
+               "test":  {"Anteroseptal": 400, "Anterolateral": 300, "Inferior": 400, "Inferolateral": 100}},
+    "folder": {"train": {"Anteroseptal": 1799, "Anterolateral": 850, "Inferior": 1798, "Inferolateral": 900},
+               "test":  {"Anteroseptal": 400, "Anterolateral": 200, "Inferior": 400, "Inferolateral": 200}},
+}
+
+# Per-artifact contract: which label rule it was built under, and how many
+# permutations it ran. `inlp` is a LEGACY artifact -- generated before both the
+# D1 fix and the 10000-permutation upgrade, and from pre-leadfix encoders. It is
+# checked for internal consistency only; do not cite numbers out of it.
+ARTIFACT = {
+    "baseline": {"label_rule": "phi",    "n_permutation": 10000, "legacy": False},
+    "inlp":     {"label_rule": "folder", "n_permutation": 200,   "legacy": True},
+}
 
 
 def check_leg(leg: dict, name: str, eval_key: str, labels: list[str]) -> list[str]:
@@ -96,14 +124,23 @@ def check_file(tag: str, path: Path) -> list[str]:
         issues.append(f"{tag}: ptbxl 4c truth counts != audit {meta['n_per_class_truth_ptbxl_4c']} vs {EXPECTED_PTBXL_4C}")
     if meta["n_per_class_truth_ptbxl_2c"] != EXPECTED_PTBXL_2C:
         issues.append(f"{tag}: ptbxl 2c truth counts != audit {meta['n_per_class_truth_ptbxl_2c']} vs {EXPECTED_PTBXL_2C}")
-    if meta["n_train_medalcare_4c"] != EXPECTED_MEDAL_TRAIN_4C:
-        issues.append(f"{tag}: medalcare train 4c counts != audit")
-    if meta["n_test_medalcare_4c"] != EXPECTED_MEDAL_TEST_4C:
-        issues.append(f"{tag}: medalcare test 4c counts != audit")
+    spec = ARTIFACT[tag]
+    exp_medal = MEDAL_4C[spec["label_rule"]]
+    if meta["n_train_medalcare_4c"] != exp_medal["train"]:
+        issues.append(f"{tag}: medalcare train 4c counts != {spec['label_rule']}-rule "
+                      f"{meta['n_train_medalcare_4c']} vs {exp_medal['train']}")
+    if meta["n_test_medalcare_4c"] != exp_medal["test"]:
+        issues.append(f"{tag}: medalcare test 4c counts != {spec['label_rule']}-rule "
+                      f"{meta['n_test_medalcare_4c']} vs {exp_medal['test']}")
     if meta["n_bootstrap"] != 1000:
         issues.append(f"{tag}: n_bootstrap != 1000 ({meta['n_bootstrap']})")
-    if meta["n_permutation_macro_f1"] != 200:
-        issues.append(f"{tag}: n_permutation_macro_f1 != 200 ({meta['n_permutation_macro_f1']})")
+    if meta["n_permutation_macro_f1"] != spec["n_permutation"]:
+        issues.append(f"{tag}: n_permutation_macro_f1 != {spec['n_permutation']} "
+                      f"({meta['n_permutation_macro_f1']})")
+    if spec["legacy"]:
+        print(f"  [LEGACY] {tag}: built under the {spec['label_rule']}-derived label "
+              f"rule with {spec['n_permutation']} permutations -- superseded, "
+              f"internal consistency only, do not cite.")
 
     results = data["results"]
     for cfg in EXPECTED_CONFIGS[tag]:

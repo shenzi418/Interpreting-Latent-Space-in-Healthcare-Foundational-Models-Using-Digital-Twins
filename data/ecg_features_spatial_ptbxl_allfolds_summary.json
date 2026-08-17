@@ -1,0 +1,22 @@
+[
+  {
+    "n_processed": 5469,
+    "n_ok": 4087,
+    "ok_rate": 0.7473029804351801,
+    "rows_with_complete_block": {
+      "ST_J60": 5415,
+      "Q_amp": 5440,
+      "R_amp": 5453,
+      "T_amp": 5416,
+      "global6": 4087
+    },
+    "failure_reasons": {
+      "some_features_nan": 1366,
+      "nk_pipeline_failed:ValueError": 11,
+      "fewer_than_2_R_peaks": 5
+    },
+    "dataset": "ptbxl",
+    "split": "folds [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
+    "n_total_rows": 21799
+  }
+]

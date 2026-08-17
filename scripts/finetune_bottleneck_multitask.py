@@ -83,10 +83,12 @@ from scripts.finetune_multilabel import (  # noqa: E402
     PTBXL_REMAP,
     SHARED_LABELS,
     _evaluate_shared_head,
+    _filter_ptbxl_dataset,
     ensure_manifest,
     make_ptbxl_loader,
     prepare_splits,
     remap_labels,
+    resolve_run_dir,
     select_primary_metric,
     set_deterministic,
     summarise_macro,
@@ -247,12 +249,15 @@ def _filter_medalcare_manifest(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[mask].reset_index(drop=True)
 
 
-def _filter_ptbxl_dataset(dataset):
-    """Filter PTB-XL like finetune_multilabel does (drop any rows with no
-    superclass labels)."""
-    targets = dataset.targets
-    keep_idx = np.where(targets.sum(axis=1) > 0)[0]
-    return torch.utils.data.Subset(dataset, keep_idx.tolist()) if len(keep_idx) < len(dataset) else dataset
+# `_filter_ptbxl_dataset` is imported from finetune_multilabel (Stage 5, 2026-08-11).
+# A second, DIVERGENT copy used to live here:
+#     keep_idx = np.where(targets.sum(axis=1) > 0)[0]
+# i.e. "keep any row with any of the FIVE superclasses", not "keep the three that
+# map into the shared space". It was also never called -- `build_loaders` below
+# passed the raw datasets straight to `make_ptbxl_loader` -- so the tier2 K64 runs
+# trained and evaluated on unfiltered PTB-XL, including STTC/HYP-only rows whose
+# remapped 3-class target is all-zero. Both facts are recorded in the audit; the
+# single shared implementation is now the only one.
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +403,12 @@ def build_loaders(args: argparse.Namespace) -> dict:
         use_high_res=True,
         return_metadata=False,
     )
-    ptb_train_ds = get_dataset("ptbxl", split="train", **dataset_kwargs)
-    ptb_val_ds = get_dataset("ptbxl", split="val", **dataset_kwargs)
-    ptb_test_ds = get_dataset("ptbxl", split="test", **dataset_kwargs)
+    # Stage 5 fix: this call was missing entirely, so every tier2 run trained on
+    # the full 5-superclass PTB-XL. The filter keeps NORM/MI/CD (PTBXL_REMAP's
+    # source columns) and drops STTC/HYP-only rows, matching the shared-head path.
+    ptb_train_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="train", **dataset_kwargs))
+    ptb_val_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="val", **dataset_kwargs))
+    ptb_test_ds = _filter_ptbxl_dataset(get_dataset("ptbxl", split="test", **dataset_kwargs))
 
     ptb_train = make_ptbxl_loader(ptb_train_ds, args.batch_size, args.num_workers, shuffle=True)
     ptb_val = make_ptbxl_loader(ptb_val_ds, args.batch_size, args.num_workers, shuffle=False)
@@ -612,11 +620,13 @@ def run_multitask(args: argparse.Namespace) -> None:
     set_deterministic(args.seed)
     metrics_to_compute = validate_metrics(args.metrics.split(","))
 
-    run_id = args.run_id or (
-        f"exp7_tier2_K{args.bottleneck_dim}_"
-        f"cls{args.lambda_cls}_bio{args.lambda_bio}"
+    run_id, out_dir = resolve_run_dir(
+        args.run_id or (
+            f"exp7_tier2_K{args.bottleneck_dim}_"
+            f"cls{args.lambda_cls}_bio{args.lambda_bio}"
+        ),
+        args.overwrite,
     )
-    out_dir = (DEFAULT_OUTPUTS / run_id).resolve()
     ckpt_dir = out_dir / "checkpoints"
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -859,6 +869,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ignore-splits", action="store_true")
 
     p.add_argument("--run-id", type=str, default=None)
+    p.add_argument("--overwrite", action="store_true",
+                   help="Allow reusing a --run-id whose metrics.json already exists.")
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--patience", type=int, default=5)
     p.add_argument("--batch-size", type=int, default=128)

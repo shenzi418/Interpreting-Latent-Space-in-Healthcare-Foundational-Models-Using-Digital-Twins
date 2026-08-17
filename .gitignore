@@ -45,3 +45,6 @@ dist/
 Thumbs.db
 *.swp
 *.swo
+
+# Scratch scripts and outputs at repo root (audit provenance lives in reports/)
+/tmp_*

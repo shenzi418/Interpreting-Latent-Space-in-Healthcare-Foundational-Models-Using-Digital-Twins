@@ -26,15 +26,18 @@ exp5_3class as conditional sensitivity (§4b).
 
 Pool modes
 ----------
-``--pool-mode asymmetric`` (default, used in the v1 INLP run):
-    Fit pool   = MedalCare-train + PTB-XL-test (the only PTB-XL latents we had).
-    Held-out   = MedalCare-test only. PTB-XL-test is in the fit pool, so the
-                 downstream-view metrics use a "synth held-out, real in-pool" mix.
-
-``--pool-mode symmetric`` (v2 sensitivity check, requires PTB-XL-train latents):
+``--pool-mode symmetric`` (DEFAULT since 2026-08-10, defect A4):
     Fit pool   = MedalCare-train + PTB-XL-train (folds 1-8).
     Held-out   = MedalCare-test + PTB-XL-test  (truly unseen on both sides).
-    Run with ``--output-suffix _inlpv2`` so v1 outputs are not clobbered.
+
+``--pool-mode asymmetric`` (v1 legacy; kept only to reproduce the original run):
+    Fit pool   = MedalCare-train + PTB-XL-test (the only PTB-XL latents we had).
+    Held-out   = MedalCare-test only. **PTB-XL-test is in the fit pool**, so any
+                 "post-INLP domains are less separable" claim measured on
+                 PTB-XL-test is partly resubstitution. The pool is also ~85/15
+                 imbalanced, which is what broke the stopping rule (see
+                 ``cv_domain_accuracy``). Use ``--output-suffix _inlp`` to
+                 reproduce v1 exactly.
 """
 
 from __future__ import annotations
@@ -97,7 +100,9 @@ DOMAIN_PTBXL = 1
 DEFAULT_MAX_ITER = 20
 DEFAULT_STOP_ACC = 0.55
 DEFAULT_SEED = 42
-DEFAULT_POOL_MODE = "asymmetric"
+# A4 fix: symmetric is the default. The legacy "asymmetric" pool puts PTB-XL-test
+# in the INLP fit pool and is ~85/15 imbalanced.
+DEFAULT_POOL_MODE = "symmetric"
 DEFAULT_OUTPUT_SUFFIX = "_inlp"
 
 
@@ -156,13 +161,28 @@ def load_combined_pool(
 # ---------------------------------------------------------------------------
 
 def cv_domain_accuracy(Z: np.ndarray, d: np.ndarray, seed: int) -> float:
-    """5-fold stratified CV accuracy of an L2 logistic domain classifier."""
+    """5-fold stratified CV **balanced** accuracy of an L2 logistic domain classifier.
+
+    FIXED 2026-08-10 (defect A4). This previously returned plain accuracy. The
+    INLP fit pool is imbalanced (~85/15 medalcare/ptbxl in asymmetric mode), so
+    a degenerate all-majority classifier scores 0.85 and the chance floor is
+    0.85, not 0.50. The stopping rule ``acc <= 0.55`` was therefore
+    **unreachable by construction** in asymmetric mode -- INLP could only ever
+    terminate by hitting ``max_iter``, and any report of "INLP converged /
+    domains became indistinguishable" was reading a number whose floor it had
+    misidentified.
+
+    Balanced accuracy has chance = 0.50 regardless of the class ratio, so
+    ``stop_acc`` means what the code always assumed it meant.
+    """
     clf = LogisticRegression(
         penalty="l2", C=1.0, solver="lbfgs",
         max_iter=2000, class_weight="balanced",
     )
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
-    scores = cross_val_score(clf, Z, d, cv=skf, scoring="accuracy", n_jobs=1)
+    scores = cross_val_score(
+        clf, Z, d, cv=skf, scoring="balanced_accuracy", n_jobs=1,
+    )
     return float(np.mean(scores))
 
 
@@ -196,16 +216,28 @@ def inlp_fit(
     stop_acc: float = DEFAULT_STOP_ACC,
     seed: int = DEFAULT_SEED,
 ) -> Tuple[np.ndarray, List[Dict]]:
-    """Run INLP. Return (P_total, iteration_log)."""
+    """Run INLP. Return (P_total, iteration_log).
+
+    Each iteration removes one direction, so after ``t`` iterations the
+    representation lives in a ``D - t`` dimensional subspace. ``rank(P_total)``
+    is recorded per iteration (defect A4): at low K the projection destroys most
+    of the space -- e.g. K=16 after 12 iterations is a **4-dimensional**
+    representation -- so any "low-K degrades more under INLP" comparison is
+    confounded with sheer capacity loss unless it is matched on final rank. Use
+    a rank-matched random-projection control to separate the two.
+    """
     D = Z_scaled.shape[1]
     P_total = np.eye(D, dtype=np.float64)
     Z_proj = Z_scaled.copy()
 
     # Iter 0: pre-INLP baseline accuracy
     acc0 = cv_domain_accuracy(Z_proj, d, seed=seed)
-    log: List[Dict] = [{"iter": 0, "domain_accuracy": acc0, "stopped": False}]
-    print(f"[inlp] iter 0 (orig)   domain_accuracy = {acc0:.4f}")
+    log: List[Dict] = [
+        {"iter": 0, "domain_accuracy": acc0, "stopped": False, "rank_P_total": int(D)}
+    ]
+    print(f"[inlp] iter 0 (orig)   domain_bal_acc = {acc0:.4f}  rank(P)={D}")
 
+    converged = False
     for t in range(1, max_iter + 1):
         t0 = time.time()
         w = fit_domain_classifier_w(Z_proj, d)
@@ -213,6 +245,7 @@ def inlp_fit(
         Z_proj = Z_proj @ P_t
         P_total = P_total @ P_t
         acc_t = cv_domain_accuracy(Z_proj, d, seed=seed)
+        rank_t = int(np.linalg.matrix_rank(P_total))
         elapsed = time.time() - t0
 
         stopped = acc_t <= stop_acc
@@ -222,18 +255,68 @@ def inlp_fit(
             "w_norm": float(np.linalg.norm(w)),
             "elapsed_s": elapsed,
             "stopped": stopped,
+            "rank_P_total": rank_t,
         })
         print(
-            f"[inlp] iter {t:>2d}        domain_accuracy = {acc_t:.4f}  "
-            f"(‖w‖={np.linalg.norm(w):.3e}, {elapsed:.1f}s)"
+            f"[inlp] iter {t:>2d}        domain_bal_acc = {acc_t:.4f}  "
+            f"rank(P)={rank_t:>4d}  (‖w‖={np.linalg.norm(w):.3e}, {elapsed:.1f}s)"
         )
         if stopped:
+            converged = True
             print(f"[inlp] stop_acc {stop_acc:.2f} reached at iter {t}.")
             break
     else:
-        print(f"[inlp] reached max_iter {max_iter} without crossing stop_acc {stop_acc:.2f}.")
+        print(f"[inlp] reached max_iter {max_iter} WITHOUT crossing stop_acc {stop_acc:.2f}.")
+
+    final_rank = int(np.linalg.matrix_rank(P_total))
+    log[-1]["converged"] = converged
+    log[-1]["final_rank_P_total"] = final_rank
+    log[-1]["ambient_dim"] = int(D)
+    if not converged:
+        print(
+            f"[inlp] NOT CONVERGED: domain balanced accuracy still "
+            f"{log[-1]['domain_accuracy']:.4f} > stop_acc {stop_acc:.2f}. "
+            "Do not describe this run as 'domains became indistinguishable'."
+        )
+    print(
+        f"[inlp] final: rank(P_total)={final_rank} / ambient {D} "
+        f"({D - final_rank} directions removed), converged={converged}"
+    )
 
     return P_total, log
+
+
+def random_projection_control(
+    D: int,
+    rank: int,
+    *,
+    seed: int = DEFAULT_SEED,
+) -> np.ndarray:
+    """Random rank-``rank`` orthogonal projector in R^D -- the A4 control.
+
+    INLP removes ``D - rank`` directions. Some of the downstream degradation is
+    the *targeted* removal of domain information; the rest is simply having
+    fewer dimensions. This builds a projector of the **same rank** onto a
+    uniformly random subspace, which removes the same amount of capacity while
+    removing nothing domain-specific.
+
+    Read the comparison as:
+
+    - INLP ≈ random control  -> the degradation is capacity loss. Any claim that
+      "low K is more domain-entangled" is unsupported; low K just had less room.
+    - INLP  < random control  -> INLP removed something the random projection did
+      not, i.e. genuinely domain-linked structure.
+
+    This is the control that decides whether the "K=16 degrades more than K=256"
+    result means anything: rank(P_total) was 4 at K=16 versus 208 at K=256, so
+    the two conditions were never comparable without it.
+    """
+    if not 0 < rank <= D:
+        raise ValueError(f"rank must be in (0, {D}], got {rank}")
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((D, rank))
+    Q, _ = np.linalg.qr(A)          # D x rank, orthonormal columns
+    return Q @ Q.T                  # rank-`rank` orthogonal projector
 
 
 def apply_alignment(
