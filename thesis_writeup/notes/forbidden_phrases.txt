@@ -30,7 +30,7 @@ clean(ly)? (negative|partial)
 recovered better in real
 # 9
 p ?= ?0\.76
-lead-order detector
+(is|as|becomes|serves as) a lead-order detector
 # 11
 significantly anti-?correlated
 feature ranking is significantly
