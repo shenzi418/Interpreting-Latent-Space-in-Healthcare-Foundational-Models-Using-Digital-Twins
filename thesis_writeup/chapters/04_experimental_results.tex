@@ -1,11 +1,29 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Experimental Results}
 \label{ch:results}
-% Holds decision-doc Ch4 (audit, F1), Ch5 (prediction + repair, F2/F3) and Ch6
-% (the road to the audit) as three top-level SECTIONS. See 00_thesis_structure.md §2 (Ch4).
-% 4.1 The simulator relocates pathology information: the fidelity audit (F1)  [Fig 1, audit table → appendix]
-% 4.2 Fidelity predicts transfer (F2)                                        [Fig 2, F2 block table]
-% 4.3 Restriction and reweighting cannot repair it (F3)                     [Fig 3, F3 arm grid + nulls]
-% 4.4 What does transfer: zero-shot frame, inferior-lead parity (C5, C6)
-% 4.5 The road to the audit: alignment dead-end, corruption detector, Track 3 verdict, 12-cell grid, in-domain advantage
-\todo{Ch4 — M4/M5/M6}
+% Section order = thesis_writeup/01_thesis_structure_v2.md §4 (Option B, question-logic; pending N2 sign-off).
+% Stubs so that cross-references from Ch3 resolve; content briefs are in the structure doc.
+
+\section{Adapting ECGFounder to the digital twin}
+\label{sec:res-adapt}
+\todo{4.1 — exp8 family in-domain metrics (Table 4.1); the 2×2 design and what survives the fix (UNKNOWN); pre-fix numbers → Appendix A.2}
+
+\section{The two latent distributions cannot be aligned}
+\label{sec:res-align}
+\todo{4.2 — four attacks, C2ST 1.0 table; over-determination; withdrawn INLP frontier (linear vs GBDT); lead-order bug as an instrument episode; 77-cell sweep → corruption detector, not lead-order detector}
+
+\section{Decoding simulator territory from the latent}
+\label{sec:res-decode}
+\todo{4.3 — in-domain +0.1523 (P1) / +0.1660 (P2); Track 3 dated rule (0.55) + verdict under both modes named by code name; 12-cell paired grid; floor-aware circular evaluation (Part A); acuity test}
+
+\section{The simulator relocates pathology information: the fidelity audit}
+\label{sec:res-audit}
+\todo{4.4 — Fig 1; C1, C2, C6}
+
+\section{Fidelity predicts transfer}
+\label{sec:res-predict}
+\todo{4.5 — Fig 2; C3}
+
+\section{Restriction and reweighting cannot repair it}
+\label{sec:res-repair}
+\todo{4.6 — Fig 3; C4, C5}

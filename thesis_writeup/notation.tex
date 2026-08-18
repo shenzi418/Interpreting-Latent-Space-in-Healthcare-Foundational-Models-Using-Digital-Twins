@@ -59,3 +59,7 @@
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\tracenote}[1]{}   % provenance pointer to an artifact file; invisible in the PDF, greppable in source
 \newcommand{\qone}[1]{#1}      % marks text whose wording depends on supervisor Q1 (scaler primacy)
+
+% ragged-right paragraph column for tables (array package is loaded by includes.tex)
+
+ewcolumntype{P}[1]{>{aggedrightrraybackslash}p{#1}}
