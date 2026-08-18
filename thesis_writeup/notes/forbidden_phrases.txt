@@ -22,8 +22,10 @@ beats chance
 # 6
 latent (wins|beats the control)
 control(54)? beats the latent
-# 7
+# 7 (rewritten 2026-08-18: dated bar is 0.55; verdict met under BOTH modes; never flatten)
 clean(ly)? (negative|partial)
+(≥|>=) ?0\.65.{0,40}(pre-?registered|pre-?specified)
+(hinges|turns) (entirely )?on (the|which) scaler
 # 8
 recovered better in real
 # 9
@@ -62,3 +64,6 @@ first synthetic-to-real ECG
 # hygiene (review-only hits): every \circR / "R =" number must be followed by its floor within the sentence
 circR ?(=|of|is) ?0\.[0-9]{2,4}
 R̄ ?= ?0\.[0-9]{2,4}
+# NAMING TRAP (owner ruling 2026-08-18): 'strict' must never appear unqualified — name the mode.
+# Allowed forms: strict (`target_pool_measured`), strict transport (`source`), strict/source, strict = ..., 	exttt{...}
+strict(?!\s*(\(|=|/|transport|-transport|mode|scaler\s*\(|\texttt|`))

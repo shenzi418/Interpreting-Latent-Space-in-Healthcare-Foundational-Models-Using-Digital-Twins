@@ -15,6 +15,7 @@ Checks (all report-only; exit code 1 if any hard failure):
                              '% verified:' line above it (not '% UNVERIFIED')
 """
 import re, sys, glob, os, io
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
