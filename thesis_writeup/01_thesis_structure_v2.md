@@ -1,7 +1,7 @@
 # Thesis structure v2 — content plan for every section
 
 **Written overnight 17→18 Aug 2026 (supersedes `00_thesis_structure.md` §2–3; §0 template constraints, §4 Declarations plan, §5 Q1–Q5 and §7 discipline in v1 still apply).**
-**Status**: DRAFT for morning sign-off. No chapter prose has been written except `06_declarations.tex` (facts you supplied) — everything else below is a content brief.
+**Status**: DRAFT for morning sign-off. Chapter prose written so far: `06_declarations.tex` (facts you supplied) and a **v0 of Ch3 §3.2 Data** (`03_contribution.tex`, clearly marked; disposable if you change the plan) — everything else below is a content brief.
 
 Sources for every claim in this plan: the four dossiers in `notes/dossiers/` (A data & setup, B history Nov→Jul, C history 10–13 Aug, E outputs inventory), the two 2026-08-13 reports, and the frozen artifacts. Each brief lists its **materials** (tables/figures with the artifact they come from) and its **cautions** (retracted / superseded / pipeline-specific numbers).
 

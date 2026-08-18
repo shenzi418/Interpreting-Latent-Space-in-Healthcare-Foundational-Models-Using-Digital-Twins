@@ -4,7 +4,7 @@
 # A hit is not automatically wrong — it is a mandatory review point. Add the item number in the commit message when a hit is cleared.
 # 1 / A.1
 b[_ -]?hat
-\hat\{b\}
+hat\{b\}
 per-stratum (slope|b)
 the mechanism for
 # 2
@@ -60,5 +60,5 @@ first sim2real
 first sim-to-real ECG
 first synthetic-to-real ECG
 # hygiene (review-only hits): every \circR / "R =" number must be followed by its floor within the sentence
-\circR ?(=|of|is) ?0\.[0-9]{2,4}
+circR ?(=|of|is) ?0\.[0-9]{2,4}
 R̄ ?= ?0\.[0-9]{2,4}
