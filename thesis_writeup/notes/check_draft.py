@@ -118,6 +118,77 @@ for k in sorted(used):
         hard_fail = True
 print(f"  {len(used)} keys used, {len(entries)} entries in bib")
 
+
+# ---------- 7. STYLE report (report-only; see 02_writing_guide.md §8) ----------
+print("=" * 78)
+print("7. STYLE (report-only)")
+lex = []
+lexp = "notes/style_lexicon.txt"
+if os.path.exists(lexp):
+    for ln in load(lexp).splitlines():
+        ln = ln.strip()
+        if ln and not ln.startswith("#"):
+            try:
+                lex.append((ln, re.compile(ln, re.I)))
+            except re.error as e:
+                print(f"[warn] bad regex in style_lexicon.txt: {ln!r}: {e}")
+
+def strip_tex(txt):
+    """Remove comments, tracenotes/todos, tabular environments, math, and commands for prose statistics."""
+    txt = re.sub(r"(?m)^\s*%.*$", "", txt)
+    txt = re.sub(r"\\tracenote\{[^}]*\}", "", txt)
+    txt = re.sub(r"\\todo\{[^}]*\}", "", txt)
+    txt = re.sub(r"\\begin\{(table|tabular|figure|tikzpicture)\*?\}.*?\\end\{\1\*?\}", " ", txt, flags=re.S)
+    txt = re.sub(r"\$[^$]*\$", " MATH ", txt)
+    txt = re.sub(r"\\(cite[pt]?|ref|label|url|texttt|emph|textbf|S)\{[^}]*\}", " X ", txt)
+    txt = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^}]*\})?", " ", txt)
+    txt = re.sub(r"[{}]", "", txt)
+    return txt
+
+for f in files:
+    raw = load(f)
+    prose = strip_tex(raw)
+    words = re.findall(r"[A-Za-z][A-Za-z'\-]*", prose)
+    nw = max(1, len(words))
+    kw = nw / 1000.0
+    em = prose.count("---") + prose.count("—")
+    notbut = len(re.findall(r"\bnot\b[^.;]{1,60}\bbut\b|\bis not\b[^.;]{1,40}[,;]\s*it is\b|\brather than\b", prose, re.I))
+    part_tail = len(re.findall(r",\s+[a-z]+ing\b[^.]{0,80}\.", prose))
+    trip = len(re.findall(r"\b\w+, \w+,? and \w+\b", prose))
+    sent_init = len(re.findall(r"(?:^|[.!?]\s+)(Additionally|Moreover|Furthermore|Notably|Importantly|Interestingly|Crucially)\b", prose))
+    bold = len(re.findall(r"\\textbf\{", re.sub(r"\\begin\{(table|tabular)\*?\}.*?\\end\{\1\*?\}", "", raw, flags=re.S)))
+    we = len(re.findall(r"\b[Ww]e\b", prose)) if "06_declarations" not in f else 0
+    # sentence lengths
+    sents = [s for s in re.split(r"(?<=[.!?])\s+", prose) if len(s.split()) >= 3]
+    sl = [len(s.split()) for s in sents]
+    import statistics as st
+    sl_mean = st.mean(sl) if sl else 0
+    sl_sd = st.pstdev(sl) if len(sl) > 1 else 0
+    # paragraph lengths (in words)
+    paras = [p for p in re.split(r"\n\s*\n", strip_tex(raw)) if len(p.split()) >= 15]
+    pl = [len(p.split()) for p in paras]
+    pl_cv = (st.pstdev(pl) / st.mean(pl)) if len(pl) > 1 and st.mean(pl) > 0 else 0
+    lex_hits = []
+    for pat, rx in lex:
+        for m in rx.finditer(prose):
+            lex_hits.append(m.group(0))
+    print(f"  {f}: words={nw}  em-dash/1k={em/kw:.1f}  not-but/1k={notbut/kw:.1f}  participle-tails={part_tail}  triplets={trip}  "
+          f"sent-init-adverbs={sent_init}  bold-in-prose={bold}  'we'={we}  sent len {sl_mean:.1f}±{sl_sd:.1f} (sd/mean {sl_sd/max(sl_mean,1):.2f})  para-cv={pl_cv:.2f} (n={len(pl)})")
+    if lex_hits:
+        from collections import Counter
+        c = Counter(h.lower() for h in lex_hits)
+        print("     lexicon:", ", ".join(f"{k}×{v}" for k, v in c.most_common(12)))
+    flags = []
+    if em / kw > 5: flags.append("em-dash density > 5/1k")
+    if notbut / kw > 1: flags.append("not-but > 1/1k")
+    if sent_init: flags.append("sentence-initial adverb connectives")
+    if bold: flags.append("bold in prose")
+    if we: flags.append("'we' outside Declarations")
+    if sl and sl_sd / max(sl_mean, 1) < 0.35: flags.append("sentence lengths too uniform")
+    if len(pl) > 3 and pl_cv < 0.35: flags.append("paragraph lengths too uniform")
+    if flags:
+        print("     FLAGS:", "; ".join(flags))
+
 print("=" * 78)
 print("RESULT:", "HARD FAILURES PRESENT" if hard_fail else "no hard failures")
 sys.exit(1 if hard_fail else 0)

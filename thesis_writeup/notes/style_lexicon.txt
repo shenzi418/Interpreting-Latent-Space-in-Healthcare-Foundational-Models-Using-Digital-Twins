@@ -1,0 +1,57 @@
+# AI-lexicon / weak-prose words for the STYLE report (one lowercase regex per line; # = comment).
+# Sources: Wikipedia "Signs of AI writing" vocabulary lists; detector write-ups (2026-08-18). Report-only.
+\bdelv(e|es|ed|ing)\b
+\bunderscor(e|es|ed|ing)\b
+\bhighlight(s|ed|ing)\b
+\bpivotal\b
+\bcrucial(ly)?\b
+\bnuanced?\b
+\blandscape\b
+\btapestry\b
+\btestament\b
+\bleverag(e|es|ed|ing)\b
+\bharness(es|ed|ing)?\b
+\bfoster(s|ed|ing)?\b
+\bbolster(s|ed|ing)?\b
+\bshowcas(e|es|ed|ing)\b
+\bmeticulous(ly)?\b
+\bintricate\b
+\bintricacies\b
+\bcomprehensive(ly)?\b
+\bholistic\b
+\bseamless(ly)?\b
+\bnotably\b
+\bimportantly\b
+\binterestingly\b
+\bstrikingly\b
+\bremarkabl[ey]\b
+\bmoreover\b
+\bfurthermore\b
+\badditionally\b
+\bin the realm of\b
+\bit is (important|worth) (to note|noting)\b
+\bplays? a (crucial |key |vital |pivotal )?role\b
+\bserves? as\b
+\bstands? as\b
+\bfunctions? as\b
+\brepresents? a\b
+\bgame[- ]chang
+\bparadigm\b
+\bcutting[- ]edge\b
+\bstate[- ]of[- ]the[- ]art\b
+\bkey (insight|takeaway|finding)\b
+\bthe honest (answer|word|reading|structure)\b
+\bhonestly\b
+\bto be (transparent|clear|honest)\b
+\bexactly the point\b
+\bthat is the (finding|point)\b
+\bin other words\b
+\bneedless to say\b
+\bit should be noted\b
+\bas mentioned (above|earlier|previously)\b
+\bas (discussed|shown|described) (above|below|earlier)\b
+\bthis (chapter|section) (has )?(presented|presents|discusses|describes|will)\b
+\bin this (chapter|section),? (we|i)\b
+\bboth\b.{0,40}\band\b.{0,20}\balike\b
+\bnot (only|just|merely) .{1,60} but (also )?\b
+\brobust(ly)?\b
