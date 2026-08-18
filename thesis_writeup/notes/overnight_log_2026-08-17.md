@@ -40,3 +40,9 @@ log everything. No new experiments.
 4. Review `chapters/06_declarations.tex` (4 \todo: ethics wording, dataset licences, artifact-commit decision) and `chapters/03_contribution.tex` §3.2 (v0).
 5. Look at figures/fig1–3 PNGs; tell me what to change.
 6. Send the two emails (Marta; second marker) if not yet sent.
+
+## Day 1 (Tue 18 Aug) — session log
+- Rulings applied: N1 (Track 3 bar 0.55, dated), N8 (two "strict"s → code names; grep enforced), timeline (no dated timeline in the thesis; Table 3.4 date-free; every main-text number post-fix; pre-fix → appendix), framing (findings-first ladder P1–P6; Ch4 section titles as findings).
+- Contradiction register written (notes/contradiction_register.md, 30 items; 17 wording, 8 appendix/limitation, 5 none).
+- Supervisor email drafted (reports/email_drafts/2026-08-18_thesis_structure_to_marta.md) — owner sending.
+- **Chapter 3 fully drafted (v0)**: §3.1 overview + Fig 3.1 TikZ schematic; §3.2 data (Tables 3.1–3.2); §3.3 model & adaptation (Table 3.3); §3.4 programme (date-free Table 3.4); §3.5 features + control arm (Table 3.5, counts from f2_blocks.json); §3.6 pipelines (P1/P2/P3, scaler modes by code name, floor derivation, two mandatory nulls, alignment diagnostics, Table 3.6, "controls that changed conclusions"); §3.7 audit definition; §3.8 transport/prediction/repair protocols + reporting rules. Builds; checker: no hard failures.
