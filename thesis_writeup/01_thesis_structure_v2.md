@@ -21,7 +21,18 @@ Your critique: v1 had no experimental setup, no data definitions, no exp1–8 hi
 
 ## 1. Headline, register, page budget
 
-- Headline claim, register (negative-as-measurement; instrument + mechanism), and claim ladder C1–C6: unchanged from the decision doc / v1 §1.
+**Framing (revised 18 Aug, owner ruling): findings first, verdicts inside.** The thesis is written so a reader sees what the year established before what it ruled out. Section titles state findings, not verdicts. The forbidden list is unchanged and still binding.
+
+**Claim ladder, reader-facing order (same facts as the decision doc's C1–C6, re-ordered):**
+- **P1 — The latent is interpretable in the twin's parameters, in-domain.** Territory decodes from the 1024-d latent far beyond a 54-feature clinical control (+0.152 macro-F1, p=0.0001, P1 pipeline; +0.166 replication on P2); φ, z, size, transmurality are linearly readable from the frozen backbone.
+- **P2 — A pre-registered transfer endpoint is met, a finer one is not.** Two-class anterior-vs-inferior transfer meets the dated PARTIAL bar under both modes (0.630 `target` / 0.652 `target_pool_measured`, p<0.01, bar 0.55); four-class POSITIVE (≥0.45) is not met (0.344 / 0.336). Latent vs control cross-domain: statistically indistinguishable (twelve paired cells).
+- **P3 — What transfers is compact and identifiable.** A 12-d inferior-lead subspace matches the 1024-d readout cross-domain and beats the measured features (+0.044, p<0.001); zero-shot, the readout lands real records in the correct anchor frame under the target scaler (p=0.0033 vs both nulls); the frontal-axis anchor transfers fit-free (0.304).
+- **P4 — A new instrument and a discovery about the twin.** The per-feature informativeness-fidelity audit gives a CI-backed map (28 blind spots + axis; 14 spurious columns) and shows MedalCare-XL relocates territory information across measure-blocks (block-mean ρ=−0.587; T within-block +0.71). Marginal realism and informativeness fidelity dissociate.
+- **P5 — The audit predicts transfer out-of-sample.** Real-domain block informativeness ranks transfer efficiency (ρ=+1.00); ST transports at the constant floor, Q best (paired p=0.001); CORAL repairs only the scale component.
+- **P6 — The boundary, with its mechanism.** Channel restriction, reweighting and recalibration do not recover the loss: the deficit is information the simulator never wrote (reweighting harms; best restriction = parity). Alignment of the two latent distributions is not achievable by the methods tried (C2ST≈1.0; over-determined gap), and the standard detector is blind to gross corruption.
+- **M — Methodology.** Floor-aware circular evaluation (constant floor as supremum; permutation nulls below it; floor-free metrics); the two mandatory nulls; paired arm-vs-arm tests.
+
+- Register: instrument + mechanism; negatives are measurements with named causes, never a failure log.
 - **Page budget (main text ≈ 55 pp)**: Ch1 4 · Ch2 8 · Ch3 14 · Ch4 24 · Ch5 5 · (Ch6 Declarations 3) · Appendices ≈ 10 · References.
 - **Figures**: Fig 1 audit map (built), Fig 2 block transfer (built), Fig 3 repair forest (built), + Fig 3.1 pipeline overview schematic (to draw), + Fig 4.1 C2ST-vs-transfer from the 77-cell sweep (from `outputs/analysis/leadperm_sweep/`; optional). Nothing else.
 - **Tables** (main text): ~14, listed per section below. Big grids → appendix.
@@ -122,14 +133,14 @@ Each brief: purpose → content → materials → cautions. Numbers below are th
 - **Materials**: Table 4.1 (exp8 family metrics; from `outputs/*/metrics.json`); Appendix A.2 (pre-fix table).
 - **Cautions**: no pre/post before-after; ccMMD "changes nothing downstream" one sentence.
 
-### 4.2 The two latent distributions cannot be aligned — and the standard detector is blind (3.5 pp)
+### 4.2 The domain gap in the latent space: what it is made of, and why the standard detector misses it (3.5 pp)
 *Purpose*: the first negative, stated once with the mechanism measured; and the instrument critique that licenses everything after.
 - The four attacks (training-time MMD/ccMMD; post-hoc INLP at K=1024 and low K; PCA to K=8; trained bottleneck K=16) all leave held-out C2ST ≈ 1.0 (Card G table: 1.0000 under swapped / leadfix / leadfix+per-lead-z while MMD −18 % and kNN mixing 4×; all five `exp8` encoders 1.0000). Over-determination: marginals alone 0.9999, dependence alone 0.9993 (6/6 checkpoints down to K=16); the withdrawn INLP `max_iter=20` frontier and the linear-vs-GBDT lesson ("a linear probe licenses only linear claims").
 - The lead-order bug as an *instrument* episode: physics-identity table (Card A2), 2×2 involution diagnostic (0.2132 → 0.3278, sign-reversal interaction), then the 77-cell sweep: linear C2ST spread 1e-5, GBDT 9e-5, ρ ≈ −0.04 with damage across a 2× range in transfer; randoms 7/10 below identity's CI; 0/66 transpositions detected; 39/66 *improve* transfer; the historical bug cell ranks 70/77; identity p = 0.1139 → transfer is a **corruption detector, not a lead-order detector**; the fix is carried by physics, not by p (forbidden #9).
 - **Materials**: Table 4.2 (three-condition C2ST/MMD/kNN); Table 4.3 (over-determination, 6 rows); Table 4.4 (sweep summary); optional Fig 4.1 (transfer vs C2ST scatter, 77 cells). Appendix: full 77-cell table; INLP protocol v1/v2; label-shift bound; subspace/CORAL/quantile branches.
 - **Cautions**: never "INLP converged"; never the K-ordering claim; every C2ST is held-out.
 
-### 4.3 Decoding simulator territory from the latent: in-domain success, cross-domain null (6 pp)
+### 4.3 Territory decodes in-domain, and partially across the gap (6 pp)
 *Purpose*: the second negative — pre-registered, honestly scored, with the retracted control-win included and the floor-aware re-reading of the circular readout.
 - 4.3.1 In-domain: the latent decodes θ-territory far beyond the 54-feature control (**+0.1523 macro-F1, p=0.0001, n=1200, P1 pipeline**; predecessor +0.1367; independent replication +0.1660 on P2, n=6513); the axis is *below the constant floor in-domain* (η² 0.0020) — the seed of the audit. K64 capacity dissociation (in-domain survives, cross-domain 0/8 blocks). One paragraph on the 8-class anatomy×transmurality audit *as superseded May evidence* or omit (dossier B: appendix).
 - 4.3.2 Track 3 [**ruled 2026-08-18, N1 accepted**]: the pre-registered rule quoted verbatim from the dated May log with its provenance (**POSITIVE 4-class ≥ 0.45, p<0.01; PARTIAL 2-class ≥ 0.55, p<0.01**; May scoring NEGATIVE at 0.235 / 0.461 on pre-fix encoders); re-scored on `exp8_leadfix_medalonly`, n=4324: 4-class **0.3440 (`target`) / 0.3357 (`target_pool_measured`) — POSITIVE not met under either mode**; 2-class **0.6299 / 0.6521 — PARTIAL met under BOTH modes at the dated 0.55 bar** (footnote: the 0.65 in later working notes would be met under `target_pool_measured` only). The verdict no longer hinges on the scaler; the mode question survives only for the paired latent-vs-control comparison (4.3.3) and the circular pipeline (4.3.4, Q1b). Permutation p at the 1e-4 floor for both arms on both endpoints → uninformative; only paired tests order arms. **Table 4.5** verdict table (both bars shown, both scalers).
@@ -137,13 +148,13 @@ Each brief: purpose → content → materials → cautions. Numbers below are th
 - 4.3.4 The circular readout under floor-aware evaluation (Part A): every transported R̄ below the 0.29216 floor at label-free α (Table 4.7 α sweep, compact); the reductio (constant predictor "beats" the empirical floor at α=1e7); the axis wins R̄ by being a well-placed constant (arc 41.9°, wrong cyclic order); floor-free metrics × scaler (**zero-shot frame positive under target only**: macro-F1 0.3402 vs random-projection and shuffled-refit nulls p=0.0033; strict: η² p=0.34; the supervised increment over the axis fails its random-projection null p=0.093 — forbidden #4); conditional MI non-redundancy; the in-domain mirror (latent 0.6195 ≫ control54 0.4535 ≫ axis 0.2050); S(b): only the integer points S(1)>S(0) survive; no b̂, no "unit gain"; Kempter 2012. **Table 4.8** three-arm mirror; **Table 4.9** floor-free × scaler. Acuity test (ρ = −0.034 strict / +0.017 target, non-monotone) travels with the ST-vs-Q/R mechanism statement in 4.4.
 - **Cautions**: label the pipeline on every macro-F1 (P1 vs P2 vs F3 ridge+anchor); Track 3 threshold footnote; "statistically indistinguishable"; anchors are constructions of the simulator; oracle ceiling 0.867 for any 4-class number.
 
-### 4.4 The simulator relocates pathology information: the fidelity audit (6 pp) — **Fig 1**
+### 4.4 The fidelity audit: where each domain writes territory information (6 pp) — **Fig 1**
 Content exactly as v1 §2 (Ch4 §4.1 brief) — C1, C2, C6: the map; blind spots (28 + axis; Q_amp_III 0.006→0.324; axis 0.0020 vs 0.1297 at matched dispersion, real-side direction physiological); spurious channels (14 columns / 13 distinct; 9/12 ST_J60 leads; ST not uniformly spurious — V4/avg real>sim); block-level inversion (block-mean ρ −0.587; per-feature −0.354 NOT significant, block-aware p 0.10/0.14; T within-block +0.706 POSITIVE); marginal-realism *dissociation* (never anti-correlated); MNAR globals; 4c/2c robustness with the R_amp_V6 exception; MedalCare's own 39 % vs 62 % as clinician-level corroboration; the strongest objection (label-space mismatch) and its three-part answer. **Tables 4.10** block-mean η² + within-block ρ; **4.11** top blind spots / spurious with CIs; full 54-row table → Appendix A.1 (auto-generated from `f1_fidelity.json`).
 
-### 4.5 Fidelity predicts transfer (3.5 pp) — **Fig 2**
+### 4.5 The audit predicts which channels transfer (3.5 pp) — **Fig 2**
 As v1 brief (C3 + axis frame-vs-fit + T-block): per-block in→cross under both scalers; ST at the constant floor under source (0.1551 vs 0.1534, CI contains floor; eff 0.006) vs Q best (0.612); paired block orderings (ST−Q −0.083, p=0.001) as the robust core; ρ(η²_sim, eff_src) = −0.900, exact one-sided p=0.0417 (two-sided 0.0833 misses — say so), fold-seed sensitivity (seed 7: −0.700); η²_real ↔ eff ρ=+1.00; CORAL boundary (target ρ≈+0.10; ST 0.006→0.296, still second-worst); axis fit-free 0.3043 vs sim-fitted 0.178; globals eff 0.936 not headlined. **Table 4.12** F2 block table.
 
-### 4.6 Restriction and reweighting cannot repair it (3 pp) — **Fig 3**
+### 4.6 What transfers, what does not, and why: the limits of repair (3 pp) — **Fig 3**
 As v1 brief (C4, C5): Q+R restriction loses (−0.0552, p<0.001); ST12 at/below the random-projection bulk; Q+R vs ST ordering holds (+0.0855); inferior-lead 12-d **parity** (+0.0025, p=0.79; both nulls; beats measured inferior features +0.0441) — best-of-8 caveat, main text (Q3a); reweighting harms (axis-pair −0.0732, survives ESS control; six-feature only with the ESS caveat); dual-encoder mirror; the paired p attaches to F1 levels not ratio ordering. **Table 4.13** F3 arm grid + nulls. Closing paragraph: what the three results compose to (C.4 of the report) and the subspace-orthogonality result as the representation-level residual.
 
 *(Option A ordering, if preferred: 4.4→4.5→4.6 first, then 4.1→4.3 as "the road to the audit" — same briefs, ~1 page less because the history compresses when it comes last.)*
@@ -155,7 +166,10 @@ A.1 full 54-feature audit table · A.2 pre-fix run table (exp1–7, Track 1/Tier
 
 ---
 
-## 6. Decisions for the morning (new items first)
+## 6. Decisions (N1, N8 ruled 18 Aug; timeline ruling 18 Aug: no dated timeline in the thesis — Table 3.4 is a date-free phase table; every main-text number is post-fix; pre-fix numbers appendix-only)
+
+(see notes/contradiction_register.md for the 30-item register)
+
 
 | # | Decision | My recommendation | Why it matters |
 |---|---|---|---|
