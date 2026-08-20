@@ -14,7 +14,125 @@
 
 \section[Territory decoding in and across domains]{Territory decodes in-domain, and partially across the gap}
 \label{sec:res-decode}
-\todo{4.3 — in-domain +0.1523 (P1) / +0.1660 (P2); Track 3 dated rule (0.55) + verdict under both modes named by code name; 12-cell paired grid; floor-aware circular evaluation (Part A); acuity test}
+% v0 DRAFT (D4). Numbers verified against IA §6.4b/c (twelve-cell grid), tmp_t4_alpha_grid.txt,
+% tmp_floorfree_out.txt, MR A.2-A.6 before writing. Paragraph plan: v3 §4.3. Claim rows: P1, P2, P2', P3', M, M'.
+
+\subsection{In-domain: the latent reads the simulator's territory}
+\label{sec:indomain}
+
+Within the simulator, territory is easy to read off the latent and hard to read off anything else. On the P1 pipeline, scoring the same 1,200 MedalCare test rows in every arm, the latent reaches macro-F$_1$ 0.656 against 0.504 for the 54-feature control, a paired difference of $+0.152$ ($p=0.0001$); the same margin appears on the encoders that saw \ptbxl\ in training ($+0.137$), so it is a property of the representation, not of a particular fine-tuning run. The P2 pipeline, an independent readout on different rows ($n=6{,}513$, run-disjoint cross-validation), reproduces it: latent 0.620, control 0.454, a paired difference of $+0.166$ ($[+0.149, +0.182]$). Table~\ref{tab:indomain} adds the circular statistics. \tracenote{IA §6.4c closing note (+0.1523 p=0.0001 medalonly, +0.1367 baseline, n=1200, P1); MR A.6 in-domain table + paired +0.1660 [+0.1485,+0.1823] (tmp_t35_control_mirror.py)}
+
+\begin{table}[tb]
+\centering\small
+\caption{In-domain territory decoding on \medalcare\ (P2 pipeline; $n=6{,}513$; run-disjoint five-fold CV; GCV $\alpha$). The constant-predictor floor for \circR\ on the continuous angle is \Rfloormedal. The frontal axis carries essentially no territory information in the simulated cohort: its \circR\ is below the constant floor and its \etasq\ is 0.002.}
+\label{tab:indomain}
+\begin{tabular}{lrrrr}
+\toprule
+arm & \circR & $\Delta$floor & macro-F$_1$ & \etasq \\
+\midrule
+latent (1024-d) & 0.657 & $+0.563$ & 0.620 & 0.575 \\
+control (54 features) & 0.393 & $+0.299$ & 0.454 & 0.236 \\
+frontal QRS axis & 0.075 & $-0.019$ & 0.205 & 0.002 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: MR A.6 in-domain block (0.6574/+0.5633/0.6195/0.5747; 0.3933/+0.2992/0.4535/0.2361; 0.0750/-0.0191/0.2050/0.0020)}
+
+The axis row is the audit of \S\ref{sec:res-audit} seen from the other side: in the simulated cohort the oldest clinical localisation channel sits \emph{below} the constant-predictor floor. Any readout fitted on this cohort is being taught that the axis carries nothing.
+
+Latent width is not what limits transfer. A 64-dimensional bottleneck keeps in-domain decoding but transfers worse than the 54-dimensional control, so the cross-domain results below are not an artefact of comparing a 1024-dimensional representation with a 54-dimensional one; the control's regularisation is also tuned separately per arm on source cross-validation. \tracenote{CLAUDE.md 08-11 bullet (K64 transfers worse than the control; C tuned per arm); dossier C cross-cutting table (K64 in-domain 0.52 survives)}
+
+\subsection{The pre-registered decision rule}
+\label{sec:track3}
+
+Before any cross-domain number existed, the project fixed a decision rule for territory transfer:\footnote{A later working note recorded the PARTIAL bar as 0.65. The dated pre-registration record, and the threshold constant in the script that generated it, both read 0.55, and that is the rule scored here; under the later 0.65 bar the two-class endpoint would be met under \texttt{target\_pool\_measured} only (0.652) and missed under \texttt{target} (0.630). \tracenote{provenance: reports/b2cd_redux_log.md (generated 2026-05-15) PARTIAL >= 0.55; scripts/_b3_5_build_b2cd_redux_log.py PARTIAL_2C_F1 = 0.55 at tag pre-leadfix; memory note 0.65 undated; ruling N1 2026-08-18}}
+
+\begin{quote}
+POSITIVE: four-class macro-F$_1 \geq 0.45$ with permutation $p < 0.01$. PARTIAL: two-class anterior-versus-inferior macro-F$_1 \geq 0.55$ with $p < 0.01$. Otherwise NEGATIVE.
+\end{quote}
+
+Scored with the earlier pipeline it returned NEGATIVE on both endpoints (Appendix~\ref{app:prefix}). Scored on the validated pipeline, with the clean encoder and all ten folds ($n=4{,}324$), it returns the split verdict of Table~\ref{tab:track3}: the four-class primary endpoint is not met under either scaler mode (0.344 under \texttt{target}, 0.336 under \texttt{target\_pool\_measured}, against a bar of 0.45), and the two-class endpoint is met under both (0.630 and 0.652 against a bar of 0.55). A readout fitted only on simulated hearts, never shown a real label, sorts real infarcts into anterior versus inferior well above its pre-registered bar; the four-way distinction it cannot yet make. \tracenote{IA §6.4c verdict table (0.3440/0.3357; 0.6299/0.6521; n=4324)}
+
+\begin{table}[tb]
+\centering\small
+\caption{The pre-registered rule scored on the validated pipeline (P1; \texttt{exp8\_leadfix\_medalonly}; all folds, $n=4{,}324$; latent arm). Every label-shuffle permutation $p$ in this table sits at its $10^{-4}$ floor for both arms on both endpoints, so passing it carries no information and the bar's $p<0.01$ clause is met trivially by every arm; only the paired arm-versus-arm tests of Table~\ref{tab:grid12} order arms.}
+\label{tab:track3}
+\begin{tabular}{lrrrl}
+\toprule
+endpoint & \texttt{target} & \texttt{target\_pool\_measured} & bar & verdict \\
+\midrule
+four-class (primary) & 0.344 & 0.336 & $\geq 0.45$ & not met under either mode \\
+two-class (secondary) & 0.630 & 0.652 & $\geq 0.55$ & met under both modes \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: IA §6.4c; permutation floor 9.999e-05 both arms both endpoints}
+
+The caption's caveat deserves its own sentence, because it changes how every number in this subsection may be used. At $n=4{,}324$ the label-shuffle $p$ for \emph{every} arm, including the hand-crafted control, sits at the $10^{-4}$ floor; passing it says only that a readout uses the labels at all. No floor $p$-value is quoted as evidence anywhere in this thesis, and every comparative claim rests on a paired test.
+
+\subsection{Latent against control across the gap}
+\label{sec:grid12}
+
+Table~\ref{tab:grid12} is the complete set of paired latent-versus-control comparisons run across the gap: two encoders, two evaluation sets, both scaler modes, both endpoints. It is shown whole because a selective reading of it once misled this project (below). On the four-class primary endpoint at full power the two arms are statistically indistinguishable: $+0.014$ ($p=0.16$) under \texttt{target}, $+0.004$ ($p=0.69$) under \texttt{target\_pool\_measured}. Across the twelve tests exactly two reach nominal $p<0.05$, in opposite directions, and neither survives a Holm correction over the twelve. Two opposite-signed nominal hits in twelve tests is what noise looks like. \tracenote{IA §6.4c twelve-row grid; Holm statement ibid.}
+
+\begin{table}[tb]
+\centering\small
+\caption{All twelve paired cross-domain latent-versus-control tests (P1 pipeline; $\Delta = $ latent $-$ control; group-bootstrap CI; paired-swap $p$). ``baseline'' saw \ptbxl\ folds 1--9 in training and is evaluated on fold 10; ``medalonly'' never took a \ptbxl\ gradient. The two nominal hits (bold) point in opposite directions; neither survives Holm across the twelve.}
+\label{tab:grid12}
+\begin{tabular}{llrlrrrl}
+\toprule
+mode & encoder & $n$ & endpoint & latent & control & $\Delta$ & $p$ \\
+\midrule
+\texttt{target} & baseline & 438 & 4-class & 0.279 & 0.344 & $-0.066$ & \textbf{0.040} \\
+\texttt{target} & baseline & 438 & 2-class & 0.592 & 0.627 & $-0.035$ & 0.254 \\
+\texttt{target} & medalonly & 438 & 4-class & 0.311 & 0.344 & $-0.033$ & 0.286 \\
+\texttt{target} & medalonly & 438 & 2-class & 0.620 & 0.627 & $-0.007$ & 0.772 \\
+\texttt{target} & medalonly & 4324 & 4-class & 0.344 & 0.330 & $+0.014$ & 0.162 \\
+\texttt{target} & medalonly & 4324 & 2-class & 0.630 & 0.635 & $-0.005$ & 0.621 \\
+\texttt{t\_p\_measured} & baseline & 438 & 4-class & 0.280 & 0.330 & $-0.051$ & 0.098 \\
+\texttt{t\_p\_measured} & baseline & 438 & 2-class & 0.616 & 0.621 & $-0.005$ & 0.836 \\
+\texttt{t\_p\_measured} & medalonly & 438 & 4-class & 0.319 & 0.330 & $-0.011$ & 0.719 \\
+\texttt{t\_p\_measured} & medalonly & 438 & 2-class & 0.627 & 0.621 & $+0.006$ & 0.889 \\
+\texttt{t\_p\_measured} & medalonly & 4324 & 4-class & 0.336 & 0.332 & $+0.004$ & 0.695 \\
+\texttt{t\_p\_measured} & medalonly & 4324 & 2-class & 0.652 & 0.633 & $+0.020$ & \textbf{0.044} \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: IA §6.4c full grid, all twelve rows verbatim (3 d.p.); t_p_measured = target_pool_measured}
+
+The control earns the comparison. Its 54 features are clinically interpretable, spatially resolved, and its regularisation is tuned on the source exactly as the latent's is; on the evaluation rows 24.7\,\% of records carry at least one imputed feature column, and the imputation check runs in the control's favour (coverage is slightly better on the full-power evaluation set than on fold 10). The comparison is also provably encoder-independent on the control side: the control reproduces to four decimals across every fold-10 cell, so whatever moves between rows of the table is the latent. \tracenote{IA §6.4b (imputation 75.3 vs 72.4 pct; control 0.3442/0.3304 to four decimals); A§4.2 imputation load}
+
+An earlier reading of this comparison was withdrawn, and the mechanism of the error is instructive. At $n=438$ with the \ptbxl-supervised encoder the control led in five of five pre-registered cells, nominally significantly under one mode ($-0.066$, $p=0.040$). Replacing the encoder with one that never saw \ptbxl, on the same 438 rows, shrinks the difference to insignificance under both modes; the encoder contributes $+0.033$ and $+0.040$ under the two modes, consistently, while the evaluation-set contribution sits inside the fold-10 confidence interval. The published effect was conditional on the encoder having been supervised on the evaluation domain, and it was never robust to the scaler mode even on its own encoder ($p=0.098$ under \texttt{target\_pool\_measured}). Selective quotation of favourable cells is the failure this table is designed to prevent. \tracenote{IA §6.4b (decomposition +0.0325/+0.0396 encoder; eval-set +0.0476/+0.0152 inside CI [-0.0915,+0.0234]; one significant cell of four)}
+
+\subsection{The circular readout, read against its floor}
+\label{sec:floors}
+
+The P2 pipeline reads territory as an angle, and its natural score, the circular agreement \circR, has the constant-predictor floor of \S\ref{sec:p2}: on the four-anchor \ptbxl\ target any constant scores \Rfloorptb. Table~\ref{tab:alpha} shows why that floor has to be printed next to every number. At the regularisation chosen without target labels (generalised cross-validation, $\alpha=741$), the transported latent readout scores $\circR = 0.259$, \emph{below} the floor by $0.033$ ($[-0.061, -0.004]$). Increasing $\alpha$ raises \circR\ steadily, but by concentrating the predictions: the arc covered by the four predicted territory means shrinks from $199^\circ$ toward $47^\circ$, the anatomical ordering breaks, and in the limit ($\alpha = 10^{7}$) a numerically constant predictor still posts a nominally positive margin over the empirically estimated floor ($+0.0013$, interval excluding zero). A metric that a constant can win is not evidence of transfer, and no label-free rule finds the $\alpha$ window that clears the floor legitimately. \tracenote{tmp_t4_alpha_grid.txt medalonly/target rows (GCV 740.6: 0.2593, -0.0328 [-0.0610,-0.0038], arc 199.1; 1e7: 0.2935, +0.0013 [+0.0007,+0.0020], arc 0.6, S(0)=0.9997); MR A.2}
+
+\begin{table}[tb]
+\centering\small
+\caption{The $\alpha$ sweep of the transported latent readout (P2; medalonly; \texttt{target} mode; $n=4{,}324$; patient-block bootstrap on $\Delta$floor $= \circR - \Rfloorptb$). ``order'' = the four predicted territory means preserve the anatomical cyclic order. Raising $\alpha$ buys \circR\ by collapsing the predictor toward a constant; the last row is numerically constant and still clears the empirical floor. Full grid in Appendix~\ref{app:supp}.}
+\label{tab:alpha}
+\begin{tabular}{rrrrcl}
+\toprule
+$\alpha$ & \circR & $\Delta$floor & 95\,\% CI & covering arc & order \\
+\midrule
+741 (GCV) & 0.259 & $-0.033$ & $[-0.061, -0.004]$ & $199^\circ$ & yes \\
+$3.2\times10^{3}$ & 0.293 & $+0.001$ & $[-0.027, +0.028]$ & $189^\circ$ & yes \\
+$1\times10^{4}$ & 0.316 & $+0.024$ & $[-0.002, +0.050]$ & $155^\circ$ & yes \\
+$3.2\times10^{4}$ & 0.335 & $+0.043$ & $[+0.019, +0.067]$ & $89^\circ$ & yes \\
+$1\times10^{5}$ & 0.345 & $+0.053$ & $[+0.033, +0.074]$ & $47^\circ$ & no \\
+$1\times10^{7}$ & 0.294 & $+0.0013$ & $[+0.0007, +0.0020]$ & $0.6^\circ$ & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: tmp_t4_alpha_grid.txt lines for medalonly/target (0.2593/0.2929/0.3163/0.3347/0.3452/0.2935 with CIs and arcs 199.1/188.6/155.2/88.5/46.7/0.6)}
+
+The frontal axis makes the complementary point. Its raw angle assigned to the nearest anchor scores $\circR = 0.403$ on its rows (floor there 0.293), the best circular agreement of any cross-domain arm, and it does so as a well-placed constant: its four predicted territory means cover $41.9^\circ$, in the wrong cyclic order, with three quarters of all records assigned to a single anchor. \circR\ cannot distinguish a readout that resolves territory from a constant that happens to point at the majority class; both arms fail differently, and \circR\ hides both failures. This is why every cross-domain conclusion in this thesis rests on the floor-free scores. \tracenote{MR A.3 (0.4034, floor 0.29337, arc 41.9, 3240/4315 to one anchor; P(latent>axis)=0 in all 20 cells)}
+
+Under the floor-free scores the transported latent readout has one genuine, bounded positive. Under the \texttt{target} mode it lands real records in the correct anchor frame with no real-domain fitting: nearest-anchor macro-F$_1$ 0.340, which no norm-matched random projection ($p=0.0033$) and no readout refitted on shuffled source labels ($p=0.0033$) reproduces. Under the \texttt{source} mode nothing distinguishes the readout from an arbitrary projection ($\etasq$ null $p=0.34$): the zero-shot frame exists only after per-column re-centring on the target cohort. \qone{Whether that re-centring is admissible in the primary reading is the declared open question of \S\ref{sec:transport-method}.} Two boundaries keep this positive honest. A supervised combination on real data (axis plus latent, patient-disjoint) adds $+0.017$ over the axis alone, but 300 random projections show comparable gains ($p=0.093$), so no supervised increment over the axis is claimed. And on raw information measures the comparison reverses: conditional mutual information shows the latent and the axis carry non-redundant territory information ($I(\mathrm{latent};T\,|\,\mathrm{axis}) = 0.05$--$0.10$ bits, $p=0.0005$, all twelve cells), but the axis alone carries more of it than any transported latent cell on the 16-bin information score. The accurate summary is that the axis carries more raw territory information in the wrong coordinate frame; the latent carries less, partly in the right frame. \tracenote{MR A.4 (0.3402, nulls p=0.0033 x2, tmp_verify_floorfree.py; source eta2 p=0.342; conditional MI 0.053-0.100 bits; MI16 axis 12/12), A.5 (T1 +0.0165 CI [+0.0043,+0.0293] p=0.011; randproj null p=0.093, q95 +0.0199, tmp_t1_randproj_null.py); floorfree artifact tmp_floorfree_out.txt line 19}
+
+Finally, the angular structure itself. The one branch-invariant statistic of the anchor analysis, agreement at integer angular gain, shows territory-dependent angular structure in every encoder (S(1) between 0.24 and 0.26 against S(0) between 0.14 and 0.21, far outside the label-permutation null), but the gain and orientation of that structure are not identifiable: the argument-maximising slope of a circular-linear fit is not unique on a cylinder \citep{kempter2012quantifying}, and estimates of it moved by a factor of two across equally arbitrary unwrapping origins in this data. No slope, gain or orientation value is therefore reported. \tracenote{MR A.1 (S(1) 0.24-0.26 vs S(0) 0.14-0.21; slope estimates 0.718-1.116 across unwrap origins, retracted; Kempter prior art); analysis/cyclic_order_test.py banner}
 
 \section[The fidelity audit]{The fidelity audit: where each domain writes territory information}
 \label{sec:res-audit}

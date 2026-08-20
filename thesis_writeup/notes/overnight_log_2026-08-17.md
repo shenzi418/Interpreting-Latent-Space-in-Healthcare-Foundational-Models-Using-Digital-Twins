@@ -62,3 +62,12 @@ log everything. No new experiments.
 - Citations verified+added: Gretton 2012 (JMLR 13(25):723–773, vol/pages web-confirmed), Lopez-Paz & Oquab arXiv:1610.06545, Ravfogel 2020 ACL, Sun 2016 AAAI; cited at the §3.6 method definitions.
 - Checker: narrowed two over-broad patterns (#18 → 0.936 only outside the footnoted table cell; #9 → only the 0.76→0.002 pairing); no hard failures. Style: 0 em-dash, para-cv 0.50.
 - Layout: long section titles overprinted the running head → short marks added ([...] optional args). Build 0 errors, 43 pp.
+
+## D4 — session log
+- §4.3 drafted (13 ¶, 5 tables) to the v3 plan, all numbers verified first:
+  - 4.3.1 in-domain: P1 +0.152 (p=0.0001, n=1200) with +0.137 predecessor; P2 replication +0.166 [+0.149,+0.182]; Table (latent/control/axis with R̄, Δfloor vs 0.0932, F1, η²); axis below floor in-domain; K64 width-not-the-limit sentence.
+  - 4.3.2 rule: verbatim quote at the dated 0.55 bar with provenance footnote (0.65 disclosed as later note, met under target_pool_measured only); earlier-pipeline NEGATIVE referenced to Appendix (no pre-fix numbers in main text); verdict table both modes; permutation-floor paragraph (no floor p as evidence anywhere).
+  - 4.3.3 the full twelve-row grid table (verbatim from IA §6.4c, 3 d.p.); "statistically indistinguishable"; two opposite nominal hits, Holm; control credentials + imputation check; the withdrawn earlier reading with the encoder/eval-set decomposition — selective quotation named as the failure the table prevents.
+  - 4.3.4 floors: α-sweep table from tmp_t4_alpha_grid.txt (GCV below floor −0.033 [−0.061,−0.004]; arc collapse 199°→0.6°; α=1e7 constant reductio +0.0013); axis as well-placed constant (0.403 vs floor 0.293, arc 41.9°, wrong order, 3/4 to one anchor); floor-free positive under target only (0.340, both nulls p=0.0033; source η² p=0.34) with Q1b marker; supervised increment fails randproj null (p=0.093) — no unqualified latent-beats-axis; conditional-MI non-redundancy + "more raw information, wrong frame" summary; S(b) integer points only, Kempter cited, no slope values.
+- Verification discrepancy recorded: α=740.6 Δfloor CI differs between MR A.2 table ([−0.0608,−0.0063]) and the on-disk grid artifact ([−0.0610,−0.0038]); thesis quotes the artifact.
+- Checker: two technical hits adjudicated (caption quoted "beats chance" to disclaim → reworded; tracenote carried the retracted slope token → reworded). No hard failures. Style: 0 em-dash, para-cv 0.50. Build 47 pp, 0 errors.
