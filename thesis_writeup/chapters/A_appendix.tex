@@ -1,8 +1,24 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Supplementary tables and reproducibility}
 \label{app:supp}
-% A.1 Full 54-feature audit table (η² sim / real, CIs, |SMD|, missingness, verdict)
-% A.2 Alpha-grid / floor tables (Part A.2), renormalised anchor table
-% A.3 Twelve-cell latent-vs-control paired grid (if Q3c → appendix)
-% A.4 Reproducibility: seeds, commands, artifact inventory, script provenance table (S4)
-\todo{appendix — M8/S4}
+
+Results presented earlier in the project, including at the June poster session, were obtained with the earlier pipeline iterations described in \S\ref{sec:preproc}; this appendix lists them together with their status after the corrections. The qualitative conclusions that survived are stated in the main text with corrected values. One poster figure is retracted outright: the cross-domain confusion pattern in which 77\,\% of inferior infarcts were assigned to the anteroseptal class was traced to the transposed limb leads in the synthetic loader (151 of 196 records before the correction, 44 of 196 after), and the corrected confusion structure appears in \S\ref{sec:res-decode}. \tracenote{reports/2026-08-10_repo_audit_and_rerun_plan.md:119-120; notes/poster_reconciliation.md}
+
+\section{The full audit table}
+\input{chapters/A1_audit_table}
+
+\section{Results from the earlier pipeline iterations}
+\label{app:prefix}
+\todo{A.2 — pre-fix run table (Exp 1–7, 2×2, Track 1/Tier 1–2, INLP magnitudes), each row flagged superseded, with the poster banner numbers included; from dossier B §2 and A§2.3.2}
+
+\section{Floor and anchor tables}
+\todo{A.3 — alpha-grid / floor tables; renormalised anchor ranks (MR A.2, A.7)}
+
+\section{Lead-permutation sweep and INLP protocol}
+\todo{A.4 — 77-cell table; INLP v1/v2 details}
+
+\section{Territory label design and scaler modes}
+\todo{A.5 — SCP rules and exclusions; oracle ceiling; scaler-mode docstrings (Card J)}
+
+\section{Reproducibility}
+\todo{A.6 — seeds, commands, artifact map; config/theta.json gap; run\_S64/S67}

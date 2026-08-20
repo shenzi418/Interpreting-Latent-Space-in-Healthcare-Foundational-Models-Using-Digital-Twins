@@ -18,7 +18,91 @@
 
 \section{The fidelity audit: where each domain writes territory information}
 \label{sec:res-audit}
-\todo{4.4 — Fig 1; C1, C2, C6}
+% v0 DRAFT 20 Aug (D2). Every number verified against outputs/analysis/fidelity_audit/f1_fidelity.json,
+% the adversarial verifier output (tmp_v_f1-fidelity-audit_out.txt), and floor_audit.json before writing.
+% Paragraph plan: 01_thesis_structure_v3.md §4.4. Claim rows: P4, P4', P4'', P4''', L in 03_claim_evidence_map.md.
+
+The audit of \S\ref{sec:audit-method} asks a question that needs no encoder: for each of the 53 distinct ECG features and the frontal QRS axis, how much four-class territory information does that measurement carry in the synthetic cohort, and how much in the real one? Figure~\ref{fig:audit} is the answer. Each point is one feature, placed by its ANOVA \etasq\ against territory in \medalcare\ (horizontal) and in \ptbxl\ (vertical), with 500-draw block-bootstrap intervals on both axes. If the simulator were informationally faithful the points would lie near the diagonal. They do not. The Q- and R-amplitude features sit far above it, the ST features far below it, and the T features close to it: the two domains agree on how much territory information the ECG carries overall, and disagree systematically about \emph{where} it is written. \tracenote{FA/f1_fidelity.json→features; fig1_points.csv; blocks readable in Fig 4.1}
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=\textwidth]{figures/fig1_eta2_scatter.pdf}
+\caption{Per-feature informativeness fidelity. Territory \etasq\ of each feature in \medalcare\ ($n=6{,}547$ MI rows; run-block bootstrap) against the same feature's \etasq\ in \ptbxl\ ($n=4{,}324$; patient-block bootstrap), on square-root axes; whiskers are 95\,\% intervals. The frontal QRS axis (circular \etasq) is the starred point. Features above the diagonal carry more territory information in reality than the simulator gives them; features below carry less. The full 54-row table is Appendix~\ref{app:audit-table}.}
+\label{fig:audit}
+\end{figure}
+
+The disagreement is a property of the measure-blocks, not of the individual features (Table~\ref{tab:blockinv}). Averaged within blocks, the simulator's ranking of where territory information lives is close to the reverse of reality's: ST is its most informative block (\etasq\ 0.060) and carries almost nothing in the real cohort (0.018), while Q and R are its least informative blocks (0.009 and 0.007) and carry the most in reality (0.088 and 0.069). The Spearman correlation between the two block-mean profiles is $-0.59$. At per-feature resolution the headline correlation of $-0.354$ (bootstrap interval $[-0.44, -0.25]$) looks significant under a naive test ($p=0.009$), but features within a block are not independent observations: a permutation that moves block labels as units gives $p = 0.10$, or $0.14$ when leads are also permuted within blocks, so no per-feature claim is licensed. Inside the blocks the simulator's ordering is uncorrelated with reality's (ST $-0.21$, Q $-0.28$, R $+0.04$, all $p>0.37$) or positively correlated (T $+0.71$, $p=0.010$; globals $+0.60$). I therefore state the finding at the resolution the data support: the simulator inverts the measure-block ranking of territory information, and within blocks its ordering is uncorrelated to positively correlated with reality. \tracenote{verifier tmp_v_f1-fidelity-audit_out.txt lines 18-31 (block table, -0.5873, p 0.1027/0.1408, residual +0.1313); FA/f1_fidelity.json→rank_agreement (-0.3544 [-0.4395,-0.2478], naive p 0.0086)}
+
+\begin{table}[tb]
+\centering\small
+\caption{The block-level relocation of territory information. Mean \etasq\ per measure-block in each domain, and the Spearman correlation between the simulated and real orderings \emph{within} each block. The block-mean profiles correlate at $\rho=-0.59$; the per-feature correlation ($-0.354$) fails a block-aware permutation test ($p=0.10$ moving blocks as units, $0.14$ permuting leads within blocks), and the within-block residuals correlate at $+0.13$ ($p=0.34$), so the inversion lives at block level. The axis pair is the two R-amplitude columns from which the frontal axis is computed; the axis itself is scored separately as a circular feature (see text).}
+\label{tab:blockinv}
+\begin{tabular}{lrrrr}
+\toprule
+block & features & mean \etasq, \medalcare & mean \etasq, \ptbxl & within-block $\rho$ ($p$) \\
+\midrule
+\STblock & 12 & 0.060 & 0.018 & $-0.21$ (0.51) \\
+\Qblock & 12 & 0.009 & 0.088 & $-0.28$ (0.38) \\
+\Rblock & 12 & 0.007 & 0.069 & $+0.04$ (0.91) \\
+\Tblock & 12 & 0.032 & 0.028 & $+0.71$ (0.010) \\
+globals & 6 & 0.016 & 0.038 & $+0.60$ (0.21) \\
+axis pair ($R_{\mathrm{I}}, R_{\mathrm{aVF}}$) & 2 & 0.006 & 0.095 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table 4.10: verifier block decomposition (0.0600/0.0176, 0.0087/0.0879, 0.0065/0.0687, 0.0316/0.0278, 0.0158/0.0377; rhos -0.2098/-0.2797/+0.0350/+0.7063/+0.6000); axis pair row = f2_blocks.json→block_eta2_features.{sim,real}_mean.axis2 (0.0061/0.0950)}
+
+Twenty-eight features, plus the axis, are confirmed blind spots: informative about territory in the real cohort while flat in the simulator, with the bootstrap interval on the difference excluding zero (Table~\ref{tab:blindspur}, upper panel). The list is dominated by the Q and R amplitudes, where 22 of the 24 lead features qualify (the Q amplitudes in V1 and V6 do not). The largest single gap is Q\_amp\_III: \etasq\ 0.006 in the simulator against 0.324 in \ptbxl, a difference of $+0.319$ with interval $[+0.290, +0.340]$.
+
+The pattern is clinically coherent. Pathological Q waves and R-wave loss are the localisation signature of established infarction, and the limb-lead Q amplitudes that head the list (III, aVF, II) are the leads a cardiologist reads for inferior infarction. \tracenote{FA/f1_fidelity.json→lists.blind_spots_4c (29 incl. axis); features Q_amp_III diff +0.3186 [0.290,0.340]; Q/R count 22/24, Q_amp_V1 and Q_amp_V6 absent from list}
+
+The frontal QRS axis makes the same point with two numbers and no delineator. Its circular \etasq\ against territory is 0.0020 in \medalcare\ and 0.1297 in \ptbxl\ (difference $+0.128$, interval $[+0.108, +0.149]$): a sixty-five-fold deficit on the oldest localisation channel in electrocardiography. This is not a variance artefact, because the axis is about equally dispersed in the two cohorts (circular SD $41.3^\circ$ synthetic, $37.9^\circ$ real), and the real-domain structure runs in the physiologically expected direction: inferior infarcts shift the mean axis to $17.2^\circ$ against $41.2^\circ$ for anteroseptal ones, a spread of $41.9^\circ$ across territory means, where the simulator's four territory means sit within $7.3^\circ$ of one another. The simulator reproduces the axis as a quantity and gives it almost none of the territory dependence reality gives it. \tracenote{FA/f1_fidelity.json→axis (0.00201/0.12973, diff CI, circ_sd 41.29/37.90); per-territory means MR A.6 table (17.2/41.2; spreads 7.3/41.9)}
+
+Fourteen columns show the opposite defect, informative in the simulator and flat in reality (Table~\ref{tab:blindspur}, lower panel): nine of the twelve ST-level features (all six limb leads plus V1, V5 and V6; ST\_J60\_aVF has \etasq\ 0.074 simulated against 0.003 real) and four T-amplitude features, one of which is the duplicated column, so thirteen distinct measurements. ST is not uniformly spurious: the mid-precordial ST\_J60\_V4 and the V2--V6 average carry slightly \emph{more} information in reality ($+0.013$ and $+0.018$, both intervals above zero). The spurious ST signal is a limb-lead phenomenon, which again is where the simulator's acute-injury physiology and the chronic real cohort part company. \tracenote{FA/f1_fidelity.json→lists.spurious_channels_4c (14; 9 ST = I,II,III,aVR,aVL,aVF,V1,V5,V6); ST_J60_aVF 0.0740/0.0028 diff -0.0712 [-0.081,-0.059]; ST_J60_V4 +0.0125 [0.003,0.026]; ST_J60_avg +0.0183 [0.006,0.034]}
+
+\begin{table}[tb]
+\centering\small
+\caption{The largest confirmed blind spots (real-informative, simulator-flat) and spurious channels (simulator-informative, real-flat), ranked by the sim--real \etasq\ difference; 95\,\% block-bootstrap intervals on the difference. In total 28 features plus the axis qualify as blind spots and 14 columns (13 distinct) as spurious; the full table is Appendix~\ref{app:audit-table}. The axis row uses circular \etasq.}
+\label{tab:blindspur}
+\begin{tabular}{lrrrl}
+\toprule
+feature & \etasq\ \medalcare & \etasq\ \ptbxl & difference & 95\,\% CI \\
+\midrule
+\multicolumn{5}{l}{\emph{blind spots}}\\
+Q\_amp\_III & 0.006 & 0.324 & $+0.319$ & $[+0.290, +0.340]$ \\
+Q\_amp\_aVF & 0.001 & 0.221 & $+0.220$ & $[+0.196, +0.247]$ \\
+Q\_amp\_II & 0.005 & 0.147 & $+0.142$ & $[+0.118, +0.166]$ \\
+R\_amp\_aVL & 0.003 & 0.133 & $+0.131$ & $[+0.106, +0.153]$ \\
+frontal QRS axis & 0.002 & 0.130 & $+0.128$ & $[+0.108, +0.149]$ \\
+R\_amp\_III & 0.006 & 0.133 & $+0.127$ & $[+0.104, +0.147]$ \\
+R\_amp\_I & 0.001 & 0.100 & $+0.099$ & $[+0.077, +0.120]$ \\
+QRS\_duration\_ms$^{\mathrm{m}}$ & 0.015 & 0.109 & $+0.094$ & $[+0.074, +0.113]$ \\
+\multicolumn{5}{l}{\emph{spurious channels}}\\
+ST\_J60\_aVF & 0.074 & 0.003 & $-0.071$ & $[-0.081, -0.059]$ \\
+ST\_J60\_III & 0.075 & 0.006 & $-0.069$ & $[-0.078, -0.055]$ \\
+ST\_J60\_II & 0.068 & 0.005 & $-0.064$ & $[-0.074, -0.054]$ \\
+ST\_J60\_aVL & 0.076 & 0.013 & $-0.064$ & $[-0.074, -0.050]$ \\
+ST\_J60\_V1 & 0.086 & 0.023 & $-0.063$ & $[-0.075, -0.049]$ \\
+ST\_J60\_V6 & 0.086 & 0.029 & $-0.057$ & $[-0.073, -0.041]$ \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize $^{\mathrm{m}}$ simulated \etasq\ MNAR-confounded (see text).}
+\end{tabular}
+\end{table}
+\tracenote{Table 4.11: FA/f1_fidelity.json→features, sorted by diff_4c_real_minus_sim; values printed from the JSON on 2026-08-20}
+
+Marginal realism does not predict any of this. If distributional mismatch explained the informativeness gaps, the features with the largest standardised mean differences between domains would show the largest \etasq\ gaps. The correlation between $|\mathrm{SMD}|$ and the absolute gap is $-0.28$ ($p=0.037$) taken at face value, and it is not robust: removing the twelve T-amplitude features flips it to $+0.08$ ($p=0.61$), and a block-level permutation gives $p=0.16$. The honest summary is dissociation. The T block has the worst marginals in the feature set ($|\mathrm{SMD}|$ 1.2--2.5) and is the only informativeness-matched block (\etasq\ 0.032 simulated, 0.028 real); the Q and R blocks have mostly unremarkable marginals ($|\mathrm{SMD}| < 1$) and hide the largest deficits. A validation protocol that checks distributions feature by feature would pass the features that fail this audit, and flag the ones that pass it. \tracenote{FA/f1_fidelity.json→marginal_vs_informativeness (-0.2840, p 0.0374); verifier lines 54-57 (excl-T +0.0828 p 0.607; block-perm p 0.1578); DD C6 (T |SMD| 1.2-2.5)}
+
+Three confounds are declared where they bite. The three simulated interval durations (QRS, QT, P) are missing for 21--24\,\% of simulator rows and the missingness depends on territory ($\chi^2$ $p$ down to $3.7\times10^{-18}$), so their simulated \etasq\ is treated as unreliable and flagged in every table; in the real cohort interval missingness is unrelated to territory ($p = 0.34$--$0.94$) and the per-lead blocks are close to complete (at most 38 of 4,324 rows missing). \texttt{T\_amplitude\_mV} duplicates \texttt{T\_amp\_II} exactly in both domains and is counted once. Repeating the whole audit on the two-class collapse of the label, which removes most of the granularity mismatch between the two label constructions, reproduces the classification of every confirmed feature except one: R\_amp\_V6 is real-informative at four classes ($+0.041$) and simulator-leaning at two ($-0.017$), both intervals excluding zero, and is reported as the exception. \tracenote{FA/f1_fidelity.json→missingness (finite 4968/5089/5168 of 6547; chi2 3.75e-18; real p 0.34-0.94), addendum→duplicate_columns; features R_amp_V6 (+0.0413 [0.027,0.056] / -0.0165 [-0.022,-0.011])}
+
+The strongest objection to the audit is that it compares \etasq\ across two label spaces that differ in kind: the simulated territory is derived from a continuous angle, the real one from diagnosis codes, and \etasq\ is sensitive to class balance. Three observations answer it. First, the map's predictions are tested out of sample in the next two sections by experiments that never compare \etasq\ across domains; readouts are fitted on simulated labels and scored on real rows, and they obey the map. A labelling artefact inside the \etasq\ comparison cannot reach into a transport experiment. Second, the two-class collapse just described shrinks the granularity mismatch and changes one feature of the confirmed set. Third, the flagship axis gap is sixty-five-fold at matched dispersion, with the real-side direction physiologically correct; no plausible class-balance perturbation spans two orders of magnitude. \tracenote{MR Part C.1 / DD Section 1 (objection and answer); sections 4.5-4.6 below}
+
+The shape of the map has a natural clinical reading. The simulator's MI model is an acute ischaemia model: its territory signal lives in the ST segment, the acute injury current. The real cohort is dominated by established infarction (90.2\,\% of the graded records are Stadium II--III or III), whose localisation signature is the Q wave, R-wave loss and the frontal axis. The audit's blind spots and spurious channels are exactly the two sides of that contrast, and I read the map as consistent with an acute-versus-chronic account. It stops short of establishing it: if chronicity were the whole story, transfer should improve on the acute minority of real records, and it does not. Aligning the transported readout's per-record agreement against acuity rank gives $\rho=-0.034$ ($p=0.10$) under the \texttt{source} scaler and $\rho=+0.017$ ($p=0.74$, wrong sign) under \texttt{target}, non-monotone in both, on the 1,490 gradable patients. The acute stratum there is small (61 Stadium~II records), so the test is weak, but it does not support the mechanism, and I do not claim it. \tracenote{CG/floor_audit.json→acuity_strata.acuity_trend (rho -0.0337 p_one_sided 0.0970 / +0.0170 p 0.7431, n_patients 1490); acuity counts Table 3.2 (1617 of 4324, 90.23 pct); claim strength: L in 03_claim_evidence_map.md}
+
+The dataset's own validation saw the symptom of all this without the location. \citet{gillette2023medalcare} validated \medalcare\ by overlaying feature distributions on a real reference and by a clinician Turing test, in which cardiologists diagnosed the pathology of real ECGs at 62\,\% and of simulated ones at 39\,\%. A drop of that size is what one expects if the channels clinicians read for diagnosis carry less information in the simulated signal, which is what the audit measures feature by feature. Their published check of feature distributions was qualitative and class-level, with hand-picked canonical features per pathology; nothing in it could have localised the deficit, and nothing in it did. The audit is the instrument their validation lacked, not a contradiction of it. \tracenote{gillette2023medalcare (62 vs 39 pct, Fig 6 protocol); framing per fence #25}
+
+The audit needs the feature matrix and the labels of both cohorts, and nothing else: no encoder, no training, no transfer experiment. On this data it runs in minutes on a CPU, and every entry comes with a bootstrap interval.
+
+Whether its map means anything for a downstream model is an empirical question. Section~\ref{sec:res-predict} tests the map as a prediction of which channels survive transport; Section~\ref{sec:res-repair} tests whether anything downstream can substitute for the information the map says is absent. \tracenote{instrument character: MR C.4; scripts analysis/fidelity_audit.py (CPU, seeds in header)}
 
 \section{The audit predicts which channels transfer}
 \label{sec:res-predict}
