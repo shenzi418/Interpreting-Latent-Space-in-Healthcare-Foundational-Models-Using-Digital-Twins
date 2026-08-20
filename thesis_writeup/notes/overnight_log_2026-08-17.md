@@ -92,3 +92,11 @@ log everything. No new experiments.
 - **Appendices A.2–A.6 drafted**: A.2 superseded-results table (AP era → 2×2 AUC → bottlenecks → Tier-2 → Phase-B2 → May Track 3 → INLP → dim-scan, all flagged); A.3 α-grid pointer + 12/12 label-free-below-floor + anchor ranks 7–11/24; A.4 sweep supplements + INLP protocol + label-shift/subspace-content exclusions; A.5 SCP rule in full + folder-label ceiling + scaler-mode documentation; A.6 reproducibility (tags, seeds, RNG discipline, artifact map, two recorded gaps).
 - Tracenotes added for restated numbers (abstract, Ch5, rule quote, blind-spot ¶). Build 62 pp, 0 errors, no hard failures. Remaining \todo: acknowledgments personalisation (owner) + 3 Declarations facts (owner: ethics wording, licences, artifact-commit decision).
 - **Full draft v1 exists. Ready for the supervisor.**
+
+## Pre-Marta integrity + humanisation pass (owner request)
+- Research refresh: readability guidance converges on mean 15–24 words/sentence with 5–35 range; drafts averaged 24–43 by chapter.
+- **20 surgical rewrites** of every sentence ≥ ~50 words in the main text + the worst in Declarations/Appendix (the 182-word disclosure sentence → 4 sentences; the 142-word review sentence → 6; the 127-word scaler-modes sentence → 4; SCP rule → 4; abstract 2; Ch1 5; Ch2 4; Ch4 5; Ch5 3; Appendix 3). No number touched. Post-pass: Ch1 mean 20w, Ch5 23w, abstract 26w with zero >45w; Ch3/Ch4 remaining long sentences are CI-dense data reporting.
+- Jargon: "nan-aware" → "missing-value-aware"; transductive glossed at first use; no other unglossed jargon found.
+- Mechanical: 0 build errors, **0 overfull hboxes**, 0 undefined references (one harmless font-shape warning), checker no hard failures.
+- **Data audit**: Table 4.1 re-verified programmatically against the six metrics.json files — exact match, 24/24 cells.
+- Visual: abstract, A.2 table, Ch2 pages rendered and inspected; appendix section short-marks added to stop running-head overlap.
