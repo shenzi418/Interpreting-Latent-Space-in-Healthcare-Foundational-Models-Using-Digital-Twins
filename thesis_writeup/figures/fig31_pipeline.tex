@@ -1,38 +1,37 @@
-% Fig 3.1 — study pipeline schematic (TikZ). Included from chapters/03_contribution.tex §3.1.
+% Fig 3.1 — study pipeline schematic (TikZ), v3: strict top-down flow, orthogonal arrows, no crossings.
+% Inputs of each analysis are tagged inside its box (z = latent, F = features) instead of drawn as arrows.
 \begin{tikzpicture}[x=1cm,y=1cm,
   font=\small,
-  box/.style={draw, rounded corners=2pt, align=center, minimum height=10mm, inner sep=5pt, fill=white},
-  data/.style={box, fill=black!4},
-  res/.style={box, fill=black!8, text width=42mm},
-  arr/.style={-{Latex[length=2mm]}, thick},
-  lab/.style={font=\scriptsize, text=black!60}
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=5pt, fill=white},
+  data/.style={box, fill=black!5, text width=54mm},
+  rep/.style={box, fill=black!3, text width=58mm},
+  ana/.style={box, fill=black!8, text width=32mm, minimum height=26mm, font=\footnotesize},
+  tag/.style={font=\scriptsize\itshape, text=black!55},
+  arr/.style={-{Latex[length=2.2mm]}, thick},
+  lab/.style={font=\scriptsize, text=black!55, fill=white, inner sep=1pt}
 ]
-% data
-\node[data] (mc) at (0,2.2) {\textbf{MedalCare-XL} (synthetic)\\16,839 ECGs; MI 7,797\\$\thetavec=(\phiang, z, \text{size}, \rho)$; territory$_{4c}$};
-\node[data] (px) at (0,-2.2) {\textbf{PTB-XL} (real)\\21,799 ECGs; MI territory 4,324\\SCP $\to$ territory$_{4c}$; acuity};
-% loader / validation
-\node[box] (load) at (6.4,0) {loader + validation\\\scriptsize sig\_name re-index, per-lead z-score,\\\scriptsize limb-lead identities, 3-class filter};
-% encoder
-\node[box] (enc) at (12.6,1.4) {\textbf{ECGFounder} (frozen)\\+ residual adapters + head\\\scriptsize exp8\_leadfix family; headline: MedalCare-only};
-% two representations
-\node[box] (z) at (19.0,1.4) {latent $\mathbf z \in \mathbb R^{1024}$\\\scriptsize exported per run and domain};
-\node[box] (f) at (12.6,-2.6) {54 hand-crafted features + frontal QRS axis\\\scriptsize NeuroKit2, lead-II fiducials, raw voltages};
-% analyses (bottom row)
-\node[res] (a1) at (19.0,-6.0) {\S4.2 alignment diagnostics\\\scriptsize C2ST (linear / GBDT), MMD, kNN mixing, INLP, lead-permutation sweep};
-\node[res] (a2) at (13.4,-6.0) {\S4.3 territory readouts\\\scriptsize P1 classifier; P2 circular readout with constant floors; pre-registered rule; 12 paired latent-vs-control cells};
-\node[res] (a3) at (7.8,-6.0) {\S4.4 fidelity audit (P3)\\\scriptsize per-feature $\eta^2$, simulated vs real; blind spots and spurious channels};
-\node[res] (a4) at (2.2,-6.0) {\S4.5--4.6 prediction and repair\\\scriptsize per-block transfer; channel restriction; reweighting; CORAL};
-% arrows
-\draw[arr] (mc.east) -- (load.west);
-\draw[arr] (px.east) -- (load.west);
-\draw[arr] (load.east) -- (enc.west);
-\draw[arr] (enc.east) -- (z.west);
-\draw[arr] (load.east) -- node[lab, below, sloped] {raw voltages} (f.west);
-\draw[arr] (z.south) -- (a1.north);
-\draw[arr] (z.south) to[out=-90,in=90] (a2.north);
-\draw[arr] (f.south) to[out=-90,in=90] (a2.north);
-\draw[arr] (f.south) to[out=-90,in=90] (a3.north);
-\draw[arr] (z.south) to[out=-110,in=70] (a4.north);
-\draw[arr] (a2.west) -- (a3.east);
-\draw[arr] (a3.west) -- (a4.east);
+% ---- row 1: cohorts
+\node[data] (mc) at (3.6,10.2) {\textbf{MedalCare-XL} (synthetic)\\\scriptsize 16,839 ECGs; MI subset 7,797\\\scriptsize $\thetavec = (\phiang, z, \mathrm{size}, \rho)$; territory$_{4c}$ from $\phiang$};
+\node[data] (px) at (11.4,10.2) {\textbf{PTB-XL} (real)\\\scriptsize 21,799 ECGs; territory$_{4c}$ 4,324\\\scriptsize SCP codes $\to$ territory$_{4c}$; acuity staging};
+% ---- row 2: loader
+\node[box, text width=88mm] (load) at (7.5,7.8) {\textbf{validated loading pipeline} (\S3.2.3)\\\scriptsize \texttt{sig\_name} re-indexing $\cdot$ per-lead z-score $\cdot$ limb-lead identity checks $\cdot$ 3-class filter};
+% ---- row 3: two representations
+\node[rep] (z) at (3.9,5.3) {\textbf{latent} $\mathbf z \in \mathbb R^{1024}$\\\scriptsize ECGFounder: frozen backbone + adapters};
+\node[rep] (f) at (11.1,5.3) {\textbf{54 features + frontal QRS axis}\\\scriptsize NeuroKit2 on raw voltages, lead-II fiducials};
+% ---- row 4: analyses, grouped
+\node[ana] (a1) at (1.85,1.7) {\textbf{\S4.2 domain gap}\\C2ST (linear, GBDT), MMD, kNN, INLP, 77-cell sweep\\[3pt]\textcolor{black!55}{\itshape inputs: z}};
+\node[ana] (a2) at (5.62,1.7) {\textbf{\S4.3 territory readouts}\\P1 classifier; P2 circular, floors; pre-registered rule\\[3pt]\textcolor{black!55}{\itshape inputs: z, F}};
+\node[ana] (a3) at (9.38,1.7) {\textbf{\S4.4 fidelity audit}\\per-feature $\eta^2$, simulated vs real; blind spots, spurious\\[3pt]\textcolor{black!55}{\itshape inputs: F}};
+\node[ana] (a4) at (13.15,1.7) {\textbf{\S4.5--4.6 prediction, repair}\\per-block transfer; restriction; reweighting; CORAL\\[3pt]\textcolor{black!55}{\itshape inputs: z, F}};
+\begin{scope}[on background layer]
+\node[draw=black!35, rounded corners=3pt, inner sep=5pt, fit=(a1)(a4), fill=black!1] (grp) {};
+\end{scope}
+\node[lab, anchor=north west] at ([xshift=1mm,yshift=-0.5mm]grp.north west) {Chapter 4};
+% ---- arrows (all orthogonal, no crossings)
+\draw[arr] (mc.south) -- ++(0,-0.45) -| ([xshift=-20mm]load.north);
+\draw[arr] (px.south) -- ++(0,-0.45) -| ([xshift=20mm]load.north);
+\draw[arr] ([xshift=-36mm]load.south) -- ++(0,-0.45) -| (z.north);
+\draw[arr] ([xshift=36mm]load.south) -- ++(0,-0.45) -| (f.north);
+\draw[arr] (z.south) -- (z.south |- grp.north) node[lab, midway, left=2pt] {$\mathbf z$};
+\draw[arr] (f.south) -- (f.south |- grp.north) node[lab, midway, right=2pt] {$F$};
 \end{tikzpicture}
