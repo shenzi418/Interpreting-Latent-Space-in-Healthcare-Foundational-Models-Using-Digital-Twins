@@ -12,6 +12,7 @@
 \usepackage{amssymb}
 \usepackage{enumitem}
 \usepackage[table]{xcolor}
+\usepackage{xurl}   % allow URLs to break anywhere (long GitHub/ICO links in Declarations)
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,fit,backgrounds}     % row shading in the audit tables (loaded before hyperref by includes? no — hyperref is already loaded; xcolor after hyperref is fine)
 
@@ -65,3 +66,5 @@
 % ragged-right paragraph column for tables (array package is loaded by includes.tex)
 \newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
 
+% loosen justification slightly rather than overflow the margin on hyphenation-poor lines
+\emergencystretch=1.2em

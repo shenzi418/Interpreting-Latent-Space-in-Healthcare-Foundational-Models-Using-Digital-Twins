@@ -92,13 +92,13 @@ The 77-cell sweep asks the question systematically: apply the identity, all 66 p
 \label{tab:sweep}
 \begin{tabular}{lrrrr}
 \toprule
-cell class & $n$ & mean macro-F$_1$ & range & mean MMD$^2$ \\
+cell class & $n$ & mean F$_1$ & range & MMD$^2$ \\
 \midrule
 identity & 1 & 0.260 & --- & 0.178 \\
-limb--limb transpositions & 15 & 0.280 & 0.259--0.320 & 0.201 \\
-limb--precordial transpositions & 36 & 0.258 & 0.227--0.285 & 0.194 \\
-precordial--precordial transpositions & 15 & 0.256 & 0.231--0.287 & 0.195 \\
-random full permutations & 10 & 0.201 & 0.162--0.225 & 0.267 \\
+limb--limb transp. & 15 & 0.280 & 0.259--0.320 & 0.201 \\
+limb--precordial transp. & 36 & 0.258 & 0.227--0.285 & 0.194 \\
+precordial--precordial transp. & 15 & 0.256 & 0.231--0.287 & 0.195 \\
+random permutations & 10 & 0.201 & 0.162--0.225 & 0.267 \\
 \midrule
 \multicolumn{5}{l}{linear C2ST: min 1.0000, spread $10^{-5}$; gradient-boosted C2ST: min 0.9999, spread $9\times10^{-5}$}\\
 \bottomrule
@@ -151,11 +151,11 @@ Scored with the earlier pipeline it returned NEGATIVE on both endpoints (Appendi
 
 \begin{table}[tb]
 \centering\small
-\caption{The pre-registered rule scored on the validated pipeline (P1; \texttt{exp8\_leadfix\_medalonly}; all folds, $n=4{,}324$; latent arm). Every label-shuffle permutation $p$ in this table sits at its $10^{-4}$ floor for both arms on both endpoints, so passing it carries no information and the bar's $p<0.01$ clause is met trivially by every arm; only the paired arm-versus-arm tests of Table~\ref{tab:grid12} order arms.}
+\caption{The pre-registered rule scored on the validated pipeline (P1; the MedalCare-only encoder; all folds, $n=4{,}324$; latent arm; \texttt{t\_pool\_measured} abbreviates \texttt{target\_pool\_measured}). Every label-shuffle permutation $p$ in this table sits at its $10^{-4}$ floor for both arms on both endpoints, so passing it carries no information and the bar's $p<0.01$ clause is met trivially by every arm; only the paired arm-versus-arm tests of Table~\ref{tab:grid12} order arms.}
 \label{tab:track3}
-\begin{tabular}{lrrrl}
+\begin{tabular}{lrrrP{3.4cm}}
 \toprule
-endpoint & \texttt{target} & \texttt{target\_pool\_measured} & bar & verdict \\
+endpoint & \texttt{target} & \texttt{t\_pool\_measured} & bar & verdict \\
 \midrule
 four-class (primary) & 0.344 & 0.336 & $\geq 0.45$ & not met under either mode \\
 two-class (secondary) & 0.630 & 0.652 & $\geq 0.55$ & met under both modes \\
@@ -173,24 +173,24 @@ Table~\ref{tab:grid12} is the complete set of paired latent-versus-control compa
 
 \begin{table}[tb]
 \centering\small
-\caption{All twelve paired cross-domain latent-versus-control tests (P1 pipeline; $\Delta = $ latent $-$ control; group-bootstrap CI; paired-swap $p$). ``baseline'' saw \ptbxl\ folds 1--9 in training and is evaluated on fold 10; ``medalonly'' never took a \ptbxl\ gradient. The two nominal hits (bold) point in opposite directions; neither survives Holm across the twelve.}
+\caption{All twelve paired cross-domain latent-versus-control tests (P1 pipeline; $\Delta = $ latent $-$ control; group-bootstrap CI; paired-swap $p$). ``joint'' is the encoder that saw \ptbxl\ folds 1--9 in training, evaluated on fold 10; ``MC-only'' is the MedalCare-only encoder. The two nominal hits (bold) point in opposite directions; neither survives Holm across the twelve.}
 \label{tab:grid12}
 \begin{tabular}{llrlrrrl}
 \toprule
 mode & encoder & $n$ & endpoint & latent & control & $\Delta$ & $p$ \\
 \midrule
-\texttt{target} & baseline & 438 & 4-class & 0.279 & 0.344 & $-0.066$ & \textbf{0.040} \\
-\texttt{target} & baseline & 438 & 2-class & 0.592 & 0.627 & $-0.035$ & 0.254 \\
-\texttt{target} & medalonly & 438 & 4-class & 0.311 & 0.344 & $-0.033$ & 0.286 \\
-\texttt{target} & medalonly & 438 & 2-class & 0.620 & 0.627 & $-0.007$ & 0.772 \\
-\texttt{target} & medalonly & 4324 & 4-class & 0.344 & 0.330 & $+0.014$ & 0.162 \\
-\texttt{target} & medalonly & 4324 & 2-class & 0.630 & 0.635 & $-0.005$ & 0.621 \\
-\texttt{t\_p\_measured} & baseline & 438 & 4-class & 0.280 & 0.330 & $-0.051$ & 0.098 \\
-\texttt{t\_p\_measured} & baseline & 438 & 2-class & 0.616 & 0.621 & $-0.005$ & 0.836 \\
-\texttt{t\_p\_measured} & medalonly & 438 & 4-class & 0.319 & 0.330 & $-0.011$ & 0.719 \\
-\texttt{t\_p\_measured} & medalonly & 438 & 2-class & 0.627 & 0.621 & $+0.006$ & 0.889 \\
-\texttt{t\_p\_measured} & medalonly & 4324 & 4-class & 0.336 & 0.332 & $+0.004$ & 0.695 \\
-\texttt{t\_p\_measured} & medalonly & 4324 & 2-class & 0.652 & 0.633 & $+0.020$ & \textbf{0.044} \\
+\texttt{target} & joint & 438 & 4-class & 0.279 & 0.344 & $-0.066$ & \textbf{0.040} \\
+\texttt{target} & joint & 438 & 2-class & 0.592 & 0.627 & $-0.035$ & 0.254 \\
+\texttt{target} & MC-only & 438 & 4-class & 0.311 & 0.344 & $-0.033$ & 0.286 \\
+\texttt{target} & MC-only & 438 & 2-class & 0.620 & 0.627 & $-0.007$ & 0.772 \\
+\texttt{target} & MC-only & 4324 & 4-class & 0.344 & 0.330 & $+0.014$ & 0.162 \\
+\texttt{target} & MC-only & 4324 & 2-class & 0.630 & 0.635 & $-0.005$ & 0.621 \\
+\texttt{t\_p\_measured} & joint & 438 & 4-class & 0.280 & 0.330 & $-0.051$ & 0.098 \\
+\texttt{t\_p\_measured} & joint & 438 & 2-class & 0.616 & 0.621 & $-0.005$ & 0.836 \\
+\texttt{t\_p\_measured} & MC-only & 438 & 4-class & 0.319 & 0.330 & $-0.011$ & 0.719 \\
+\texttt{t\_p\_measured} & MC-only & 438 & 2-class & 0.627 & 0.621 & $+0.006$ & 0.889 \\
+\texttt{t\_p\_measured} & MC-only & 4324 & 4-class & 0.336 & 0.332 & $+0.004$ & 0.695 \\
+\texttt{t\_p\_measured} & MC-only & 4324 & 2-class & 0.652 & 0.633 & $+0.020$ & \textbf{0.044} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -253,7 +253,7 @@ The disagreement is a property of the measure-blocks, not of the individual feat
 \label{tab:blockinv}
 \begin{tabular}{lrrrr}
 \toprule
-block & features & mean \etasq, \medalcare & mean \etasq, \ptbxl & within-block $\rho$ ($p$) \\
+block & features & \etasq\ \medalcare & \etasq\ \ptbxl & within-block $\rho$ ($p$) \\
 \midrule
 \STblock & 12 & 0.060 & 0.018 & $-0.21$ (0.51) \\
 \Qblock & 12 & 0.009 & 0.088 & $-0.28$ (0.38) \\
@@ -384,9 +384,9 @@ If the simulator's territory signal lives in the wrong channels, an obvious repa
 \centering\small
 \caption{Repair arms cross-domain ($n=4{,}324$; clean encoder). $\Delta$ is the paired group-bootstrap difference against the unrestricted 1024-dimensional readout (restriction arms) or the unweighted readout (reweighting arms); the random-projection $p$ is against 200 norm-matched Gaussian replacements of the learned coefficients under \texttt{target}. The shuffled-label null passes for every arm at $p=0.005$ and certifies only that the readouts use the simulated angle.}
 \label{tab:f3}
-\begin{tabular}{lrrllr}
+\begin{tabular}{P{3.5cm}rrP{3.9cm}P{2.2cm}r}
 \toprule
-arm & $d$ & F$_1$ \texttt{target} & $\Delta$ \texttt{target} [95\,\% CI], $p$ & $\Delta$ \texttt{source}, $p$ & rand.\ proj.\ $p$ \\
+arm & $d$ & F$_1$ \texttt{tgt} & $\Delta$ \texttt{target} [95\,\% CI], $p$ & $\Delta$ \texttt{source}, $p$ & r.\,proj.\ $p$ \\
 \midrule
 Q+R leads & 24 & 0.285 & $-0.055$ $[-0.075,-0.037]$, $<0.001$ & $+0.007$, 0.47 & 0.045 \\
 Q leads & 12 & 0.313 & $-0.027$ $[-0.047,-0.005]$, 0.010 & $-0.081$, $<0.001$ & --- \\
@@ -405,7 +405,7 @@ One restriction reaches parity, and it is worth describing precisely because of 
 
 The falsification arm asks whether the deficit is covariate shift after all: if the simulator carries the right information at the wrong input distribution, reweighting its training rows toward the real feature distribution should help. It hurts. Weighting \medalcare\ rows by a domain classifier on the two axis-defining features and refitting, transfer drops by $-0.073$ ($[-0.086, -0.061]$, $p<0.001$) against the unweighted readout on the same rows. The effective sample size falls to 1,120 of 6,513. A control that resamples uniformly to the same effective size scores 0.329 against the weighted 0.273, so the harm is the weighting itself, not the lost rows. A six-feature weighting summary harms by a similar amount ($-0.069$, $p<0.001$), but its effective sample size collapses to 208 of 4,968 and most of that harm is attributable to the collapse, so I rest the conclusion on the axis-pair arm. Giving more weight to the rows of the simulator that look most like reality moves the readout away from what reality needs. That is what one expects when the missing ingredient is information rather than distribution. \tracenote{FA/f3_repair.json→reweight.axpair (-0.0732 [-0.0859,-0.0609], ESS 1120/6513), reweight.six (-0.0690, ESS 208/4968); verifier ESS-matched control 0.3287 vs weighted 0.2734; caveat per forbidden #21}
 
-The sensitivity encoder reproduces the pattern: on \texttt{exp8\_leadfix\_dual} the Q+R restriction loses by $-0.064$ and the inferior-lead cell sits at $+0.0004$ ($p=0.96$). \tracenote{FA/f3_repair.json→exp8_leadfix_dual.paired}
+The sensitivity encoder reproduces the pattern: on the dual-head encoder the Q+R restriction loses by $-0.064$ and the inferior-lead cell sits at $+0.0004$ ($p=0.96$). \tracenote{FA/f3_repair.json→exp8_leadfix_dual.paired}
 
 Taken together, the three experiments say the deficit is missing information, not misplaced information. The audit measures an absence in the synthetic signal; transport tracks what the channels carry in reality and not what the simulator believes about them; and no downstream operation, not channel selection, not recalibration, not reweighting, substitutes for what was never written into the waveform. What remains after every repair is a representation-level fact: the two-dimensional planes from which territory is read out in the two domains are close to orthogonal in the latent space (normalised principal-angle overlap 0.008, interval $[0.002, 0.017]$, against split-half ceilings near 0.31--0.36), even though local neighbourhood structure corresponds in part (a nearest-neighbour transfer reaches 32--42\,\% of its ceiling). The latent is not unrelated across domains; the linear directions that encode territory are. \tracenote{2026-08-12 tier1 §2.4 (normalised overlap 0.0076 [0.0016,0.0168], ceilings 0.360/0.311) and §2.5 (kNN 32-42 pct of ceiling), both survive the 08-13 audit (MR C.4); dossier C Card I}
 
