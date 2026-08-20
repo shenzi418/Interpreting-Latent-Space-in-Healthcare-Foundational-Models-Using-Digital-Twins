@@ -2,7 +2,7 @@
 \chapter{Contribution}
 \label{ch:contribution}
 % ---------------------------------------------------------------------------
-% Section map (thesis_writeup/01_thesis_structure_v2.md §3):
+% Section map (thesis_writeup/01_thesis_structure_v3.md; details in v2 §3):
 %   3.1 Overview of the study                       [outline]
 %   3.2 Data                                        [v0 DRAFT written overnight 17->18 Aug — for review]
 %   3.3 The foundation model and its adaptation     [outline]
@@ -154,26 +154,26 @@ The bottleneck heads ($K\in\{16,64,256\}$) and their multitask variant (a three-
 
 \begin{table}[tb]
 \centering\scriptsize
-\caption{The fine-tuning runs, grouped by family. ``When'' is the month the run was trained. Test macro-F$_1$ is from each run's \texttt{metrics.json}; the PTB-XL column of the pre-fix runs ($\dagger$) was computed on a differently filtered subset (STTC in place of CD, \S\ref{sec:preproc}) and is not comparable with the post-fix rows. Hyper-parameters of runs before August 2026 were not written to disk (\texttt{args.json} did not yet exist) and are given from the run conventions. Every analysis in Chapter~\ref{ch:results} uses the \texttt{exp8\_leadfix} family; earlier families appear only in Appendix~\ref{app:supp}.}
+\caption{The fine-tuning runs, grouped by family. Test macro-F$_1$ is from each run's \texttt{metrics.json}; the PTB-XL column of the pre-fix runs ($\dagger$) was computed on a differently filtered subset (STTC in place of CD, \S\ref{sec:preproc}) and is not comparable with the post-fix rows. Hyper-parameters of the earlier run families were not written to disk (\texttt{args.json} did not yet exist) and are given from the run conventions. Every analysis in Chapter~\ref{ch:results} uses the \texttt{exp8\_leadfix} family; earlier families appear only in Appendix~\ref{app:supp}.}
 \label{tab:runs}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{P{4.6cm}lP{4.0cm}P{1.2cm}P{2.1cm}P{1.6cm}cc}
+\begin{tabular}{P{5.2cm}P{4.4cm}P{1.2cm}P{2.2cm}P{1.7cm}cc}
 \toprule
-family (run ids) & when & mode / head & labels & alignment / $K$ & trained on & Medal.\ F$_1$ & PTB F$_1$ \\
+family (run ids) & mode / head & labels & alignment / $K$ & trained on & Medal.\ F$_1$ & PTB F$_1$ \\
 \midrule
-\texttt{ptbxl\_baseline} & Mar 26 & single, adapters + linear & PTB 5 & --- & PTB-XL & --- & 0.698$^\dagger$ \\
-\texttt{joint\_baseline}, \texttt{joint\_adapter\_cls}, \texttt{joint\_adapter\_mmd} & Mar 26 & joint dual-head (+ physics head) & 8 + 5 & --- / --- / MMD & both & 0.66--0.68 & 0.70--0.71$^\dagger$ \\
-\texttt{exp5\_3class}, \texttt{exp6\_3class} & May 26 & joint dual-head & 3 + 3 & --- / ccMMD 0.1 & both & 0.87, 0.87 & 0.79, 0.79$^\dagger$ \\
-\texttt{exp7\_baseline}, \texttt{exp7\_ccmmd} & Apr 26 & joint shared-head & 3 & --- / ccMMD 0.1 & both & 0.92, 0.92 & 0.79, 0.79$^\dagger$ \\
-\texttt{exp7\_bottleneck\_K16/K64/K256} & May 26 & bottleneck head on \texttt{exp7\_baseline} & 3 & $K$ = 16 / 64 / 256 & both & 0.94, 0.94, 0.94 & 0.79, 0.80, 0.79$^\dagger$ \\
-\texttt{exp7\_tier2\_K64\_A}, \texttt{\_B} & May 26 & multitask bottleneck ($\lambda_{\mathrm{cls}},\lambda_{\mathrm{bio}}$ = 0.5, 0.5 / 0, 1) & 3 + bio & $K$ = 64 & both & 0.99, --- & 0.79, ---$^\dagger$ \\
+\texttt{ptbxl\_baseline} & single, adapters + linear & PTB 5 & --- & PTB-XL & --- & 0.698$^\dagger$ \\
+\texttt{joint\_baseline}, \texttt{joint\_adapter\_cls}, \texttt{joint\_adapter\_mmd} & joint dual-head (+ physics head) & 8 + 5 & --- / --- / MMD & both & 0.66--0.68 & 0.70--0.71$^\dagger$ \\
+\texttt{exp5\_3class}, \texttt{exp6\_3class} & joint dual-head & 3 + 3 & --- / ccMMD 0.1 & both & 0.87, 0.87 & 0.79, 0.79$^\dagger$ \\
+\texttt{exp7\_baseline}, \texttt{exp7\_ccmmd} & joint shared-head & 3 & --- / ccMMD 0.1 & both & 0.92, 0.92 & 0.79, 0.79$^\dagger$ \\
+\texttt{exp7\_bottleneck\_K16/K64/K256} & bottleneck head on \texttt{exp7\_baseline} & 3 & $K$ = 16 / 64 / 256 & both & 0.94, 0.94, 0.94 & 0.79, 0.80, 0.79$^\dagger$ \\
+\texttt{exp7\_tier2\_K64\_A}, \texttt{\_B} & multitask bottleneck ($\lambda_{\mathrm{cls}},\lambda_{\mathrm{bio}}$ = 0.5, 0.5 / 0, 1) & 3 + bio & $K$ = 64 & both & 0.99, --- & 0.79, ---$^\dagger$ \\
 \midrule
-\texttt{exp8\_leadfix\_baseline} & Aug 26 & joint shared-head & 3 & --- & both & 0.928 & 0.828 \\
-\texttt{exp8\_leadfix\_ccmmd} & Aug 26 & joint shared-head & 3 & ccMMD 0.1 & both & 0.929 & 0.823 \\
-\texttt{exp8\_leadfix\_dual} & Aug 26 & joint dual-head, shared labels & 3 + 3 & --- & both & 0.927 & 0.835 \\
-\texttt{exp8\_leadfix\_globalz} & Aug 26 & shared-head, global-scalar z-score & 3 & --- & both & 0.910 & 0.823 \\
-\texttt{exp8\_leadfix\_K64} & Aug 26 & bottleneck head on \texttt{exp8\_leadfix\_baseline} & 3 & $K$ = 64 & both & 0.952 & 0.832 \\
-\textbf{\texttt{exp8\_leadfix\_medalonly}} & Aug 26 & shared-head, MedalCare-only & 3 & --- & \textbf{MedalCare only} & 0.927 & 0.457$^\ddagger$ \\
+\texttt{exp8\_leadfix\_baseline} & joint shared-head & 3 & --- & both & 0.928 & 0.828 \\
+\texttt{exp8\_leadfix\_ccmmd} & joint shared-head & 3 & ccMMD 0.1 & both & 0.929 & 0.823 \\
+\texttt{exp8\_leadfix\_dual} & joint dual-head, shared labels & 3 + 3 & --- & both & 0.927 & 0.835 \\
+\texttt{exp8\_leadfix\_globalz} & shared-head, global-scalar z-score & 3 & --- & both & 0.910 & 0.823 \\
+\texttt{exp8\_leadfix\_K64} & bottleneck head on \texttt{exp8\_leadfix\_baseline} & 3 & $K$ = 64 & both & 0.952 & 0.832 \\
+\textbf{\texttt{exp8\_leadfix\_medalonly}} & shared-head, MedalCare-only & 3 & --- & \textbf{MedalCare only} & 0.927 & 0.457$^\ddagger$ \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -183,7 +183,7 @@ family (run ids) & when & mode / head & labels & alignment / $K$ & trained on & 
 The headline encoder for every cross-domain result is \texttt{exp8\_leadfix\_medalonly}. It never took a PTB-XL gradient step and its checkpoint was chosen on MedalCare validation alone, so all ten PTB-XL folds are legitimate evaluation data ($n=4{,}324$ territory-labelled records, \S\ref{sec:data-ptbxl}); its PTB-XL classification score in Table~\ref{tab:runs} ($0.457^\ddagger$) is a passive read-out and is reported only for completeness. Encoders that saw folds 1--9 in training (\texttt{exp8\_leadfix\_dual} and its siblings) can be evaluated on fold~10 only ($n=438$); \texttt{exp8\_leadfix\_dual} is used as a sensitivity arm. Because all encoders share one backbone, one adapter design and one seed, they are not independent replicates: the encoders are never counted as replicates, and where several are reported the effective number of independent observations is closer to two. \tracenote{A§1.2.5, A§2.3; CLAUDE.md active-state (medalonly, ~2 effective observations); decision doc §4 item 3}
 
 \subsection{Latent export}
-For each run and domain the pooled features are exported once, in the deterministic row order of the unshuffled split loader, to \texttt{outputs/latents/<run>\_<domain>/latents.npz} (\texttt{Z} the 1024- or $K$-dimensional latent, \texttt{P} the head outputs, \texttt{Y} the native labels; the two exports written after 11 August also carry the PTB-XL \texttt{ecg\_id}, against which the row-order convention was verified). All downstream analyses read these files; nothing after this point touches the network. \tracenote{A§3; scripts/export_latents.py:110-111,328-357; analysis/geom_common.py:115-127}
+For each run and domain the pooled features are exported once, in the deterministic row order of the unshuffled split loader, to \texttt{outputs/latents/<run>\_<domain>/latents.npz} (\texttt{Z} the 1024- or $K$-dimensional latent, \texttt{P} the head outputs, \texttt{Y} the native labels; two later exports also carry the PTB-XL \texttt{ecg\_id}, against which the row-order convention was verified). All downstream analyses read these files; nothing after this point touches the network. \tracenote{A§3; scripts/export_latents.py:110-111,328-357; analysis/geom_common.py:115-127}
 
 \section{The experimental programme}
 \label{sec:programme}
