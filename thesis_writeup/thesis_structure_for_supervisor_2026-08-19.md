@@ -96,70 +96,69 @@ result into an apparent success.
 
 ## 2. Chapter-by-chapter structure
 
-Page budgets are provisional and assume the ~350–400 words/page geometry of the
-template. The total main-text budget is flagged as an open item — see §5.
+Page budgets are provisional and assume the template's page geometry; the total is
+an open item (see section 5). Each row says, in plain terms, what that section will
+be about.
 
-### Chapter 1 — Introduction  (≈ 4 pp)
+### Chapter 1 - Introduction  (~4 pp)
 
-Role: state the promise, the question, and the contributions; no results.
+*What this chapter does: sets up the promise, the question, and the contributions. No results yet.*
 
-| § | Content |
+| Section | What it will say |
 |---|---|
-| 1.1 Motivation | Digital twins produce labelled ECGs at scale with the generating parameters known; foundation models produce reusable representations; combining them promises readouts of mechanistic quantities no clinical label set provides. States fairly the assumption this rests on — that a distributionally-validated synthetic cohort is a usable training cohort — and what is at stake if that assumption fails invisibly. |
-| 1.2 The question | The registered question, then how it developed: the in-domain answer, the cross-domain shortfall under a fixed rule, and the "why" the shortfall forces. |
-| 1.3 Contributions | The C1–C6 + M list above, each naming the section that delivers it. |
-| 1.4 Thesis outline | One paragraph. |
+| 1.1 Motivation | A cardiac "digital twin" is a physics simulator that produces ECGs for which the exact underlying cause is known (which artery, how large the infarct, and so on) - labels that real hospital data never has. A "foundation model" is a large pre-trained network that turns an ECG into a compact numerical summary. Combining the two promises a way to read physical properties of a heart attack directly off a real ECG. This section states the assumption that idea rests on - that if a simulator's ECGs look statistically realistic, it is safe to train on them - and why it matters if that assumption quietly fails. |
+| 1.2 The question | The question set at the start of the project: can the model's internal summary of an ECG be interpreted in terms of the simulator's physical settings, and does that interpretation carry over to real ECGs? Then how it actually turned out - it works on the simulator's own ECGs, only partly on real ones - and the "why" that gap forces us to answer. |
+| 1.3 Contributions | The list of contributions (the six findings plus the methodological one), each pointing to the section that delivers it. |
+| 1.4 Thesis outline | One short paragraph mapping out the chapters. |
 
-### Chapter 2 — Background  (≈ 8 pp)
+### Chapter 2 - Background  (~8 pp)
 
-Role: the clinical, model, data, and methodological background; each subsection
-ends with one sentence on what the thesis takes from it.
+*What this chapter does: gives the clinical, model, data and statistical background a reader needs. Each part ends with one sentence on what the thesis takes from it.*
 
-| § | Content |
+| Section | What it will say |
 |---|---|
-| 2.1 ECG and infarct localisation | The 12-lead frontal-plane logic and the QRS axis; why *acute* injury shows in the ST segment and *established* infarct in Q waves and R-wave loss (Thygesen 2018 criteria; Das 2006 on Q-wave regression) — hence a chronic-dominated cohort writes territory into Q/R. |
-| 2.2 Digital twins and MedalCare-XL | The simulation pipeline and the released dataset; the parameters θ; and its published validation quoted fairly (feature-marginal overlays; clinician Turing test 77%/83%/62-vs-39%) — distributional and clinician-level, never per-feature or transfer-linked. |
-| 2.3 PTB-XL | The real cohort, its diagnostic statements, folds, MI sub-labels and acuity grading; why the real MI cohort is chronic-dominated. |
-| 2.4 ECG foundation models | ECGFounder; adapters/linear probing on frozen backbones; the interpretability lane to date is real-data only. |
-| 2.5 Inverse inference of infarct parameters | The in-silico state of the art (Li, IEEE TMI 2024) and sim-trained/real-tested localisation for *other* tasks — establishing that the sim→real step for infarct parameters from a foundation-model latent is unclosed; the thesis measures and explains the gap, it does not close it. |
-| 2.6 Domain gap and alignment | MMD, class-conditional MMD, INLP, the classifier-two-sample-test detector, CORAL/AdaBN recalibration — the tools §4.2 uses, and their known blind spot. |
-| 2.7 Evaluating synthetic data beyond marginals | Train-on-synthetic-test-on-real; utility and feature-importance-agreement frameworks; digital-twin credibility/V&V — none audits per-feature label informativeness of a mechanistic simulator against a real cohort, which is the slot the audit fills. |
-| 2.8 Circular statistics for angular readouts | Mean resultant length and its biases; circular correlation coefficients; the arg-max non-uniqueness result; the chance-level caution — motivating the floor. |
-| 2.9 Negative results as measurements | The register the thesis adopts (Zech, DeGrave, Oakden-Rayner, Christodoulou, Ghassemi): fair statement of the belief, negative as a measurement with a mechanism, a reusable instrument as the durable contribution. |
+| 2.1 The ECG and locating a heart attack | How a standard 12-lead ECG encodes the direction of the heart's electrical activity, and the key clinical fact the thesis relies on: a *fresh* heart attack and an *old* one leave their marks on different parts of the ECG (fresh ones in the "ST segment", old ones in the "Q and R waves"). Supported by standard cardiology references. |
+| 2.2 Digital twins and the MedalCare-XL simulator | How the simulator generates ECGs, the dataset it produced, and - stated fairly - how its authors checked it was realistic (comparing the overall shape of the measurements to real data, and asking clinicians to spot the fakes). The point to carry forward: those checks were about overall realism; they never checked measurement by measurement, and never tested whether models trained on it transfer to real patients. |
+| 2.3 The PTB-XL real-patient dataset | The real clinical dataset we test against: its diagnoses, its standard train/test splits, its heart-attack sub-types, and how it records the age of each infarct - which is how we can show its heart attacks are mostly old. |
+| 2.4 ECG foundation models | The specific pre-trained model we use, and how we attach a small trainable layer to it without retraining the whole thing. The gap: prior work interpreting these models has only ever used real data, never a simulator. |
+| 2.5 Reading heart-attack properties back off an ECG | The best prior work on inferring infarct properties from an ECG was done entirely in simulation; related tasks have been taken to real patients, but this particular step - inferring infarct properties from a foundation model's summary of a *real* ECG - has not been achieved. This thesis measures and explains the gap; it does not claim to close it. |
+| 2.6 Making two datasets "look alike", and the standard test for it | The standard toolbox for forcing two datasets' numerical summaries to line up, and the standard test for whether they have - plus what that test is known to miss. These are the tools used in section 4.2. |
+| 2.7 Judging synthetic data beyond "does it look realistic" | Existing ways people judge synthetic data (train a model on synthetic and test it on real; various utility scores). The gap this thesis fills: none of them measures, feature by feature, whether a physics simulator carries the same diagnostic information as real data. |
+| 2.8 Statistics for angle-valued predictions | Some results are angles (a direction on the heart), which need special statistics. This covers the standard measure, its known pitfalls, and why it needs a proper "chance level" baseline - the small methodological point the thesis makes. |
+| 2.9 Negative results done well | A short survey of respected papers whose main contribution is a rigorous negative result, to establish the style this thesis follows: state the belief fairly, turn the negative into a measurement with a mechanism, and leave behind a reusable tool. |
 
-### Chapter 3 — Contribution (Methods)  (≈ 12 pp)  — *drafted*
+### Chapter 3 - Contribution (Methods)  (~12 pp)  - *already drafted*
 
-Role: everything built and every protocol, so the results chapter is pure findings.
+*What this chapter does: describes everything we built and every procedure, so that Chapter 4 can be pure results.*
 
-| § | Content | Objects |
+| Section | What it will say | Figures/Tables |
 |---|---|---|
-| 3.1 Overview of the study | One frozen encoder, two cohorts, three questions, one instrument. | Fig 3.1 (pipeline) |
-| 3.2 Data | MedalCare-XL and PTB-XL cohorts; the infarct-territory label design; the pre-processing and a corrected loading pipeline (a lead-order bug found and fixed). | Tables 3.1–3.3 |
-| 3.3 The foundation model and its adaptation | ECGFounder; adapters and heads; the fine-tuning modes; **which single encoder carries the headline results** (the one never exposed to real labels) and why the six encoders are not independent replicates; latent export. | — |
-| 3.4 The experimental programme | The sequence of experiments and how each fed the next. | — |
-| 3.5 Hand-crafted ECG features and the control arm | The 54-feature spatial control the latent is measured against, and the frontal-axis baseline. | — |
-| 3.6 Analysis pipelines | The classifier pipeline (P1) and the circular-geometry pipeline (P2), the two transport modes, and the alignment diagnostics. | Tables 3.4–3.6 |
-| 3.7 The informativeness-fidelity audit | The instrument: per-feature information measure per domain, confidence intervals, and the separation of marginal realism from informativeness. | — |
-| 3.8 Transport, prediction and repair protocols | How the audit is turned into transfer predictions, and the channel-restriction and reweighting interventions, with their statistical tests and null models. | — |
+| 3.1 Overview | The whole study on one page: one frozen pre-trained model, two datasets (simulator and real), three questions, and one new audit tool. | Fig 3.1 (diagram) |
+| 3.2 The data | The two datasets; how we defined which region of the heart each infarct sits in; how the ECGs are prepared; and a data-loading bug (two ECG leads swapped) that we found and fixed. | Tables 3.1-3.3 |
+| 3.3 The model and how we adapt it | The pre-trained model, the small trainable pieces we add, and the ways we train them. Also: which single trained model our headline results use (the one never shown any real-patient labels), and why the six models we trained should not be counted as six independent experiments. | - |
+| 3.4 The sequence of experiments | The order the experiments were run in, and how each one led to the next. | - |
+| 3.5 The hand-crafted comparison | A set of 54 standard, hand-measured ECG features, plus a single clinical number (the heart's electrical axis), that we hold the AI model up against as fair baselines. | - |
+| 3.6 The two analysis methods | The two ways we read infarct location out of the model, the two ways of moving a reader from the simulator to real data, and the checks on how far apart the two datasets are. | Tables 3.4-3.6 |
+| 3.7 The fidelity-audit tool | The core instrument: how it measures, for each ECG feature, how much infarct-location information it carries in each dataset (with error bars), and how it separates "looks realistic" from "carries the right information". | - |
+| 3.8 Prediction and repair procedures | How we turn the audit into predictions about what will transfer, and the two attempts to repair the transfer, each with its statistical tests. | - |
 
-### Chapter 4 — Experimental Results  (≈ 24 pp)
+### Chapter 4 - Experimental Results  (~24 pp)
 
-Role: the findings, in the order that makes the argument. This is the longest
-chapter; its six sections are the spine of the thesis.
+*What this chapter does: the findings, in the order that builds the argument. This is the longest chapter and the spine of the thesis.*
 
-| § | What it delivers | Objects |
+| Section | What it shows | Figures/Tables |
 |---|---|---|
-| 4.1 Adapting ECGFounder to the twin | The encoders classify well in-domain and transfer at class level only weakly; the encoders differ little — what matters is what the latent *carries*, not the encoders as replicates. | Table 4.1 |
-| 4.2 The domain gap, and why the standard detector misses it | The two latent distributions are perfectly separable however we align them; a 77-input-corruption sweep shows the detector is blind to gross corruption — so distribution-level alignment is not the route, and the question becomes *what information* the latent carries. | Tables 4.2–4.4, opt. Fig 4.4 |
-| 4.3 Territory decodes in-domain, partially across the gap | In-domain the latent beats the control by +0.15; the pre-registered rule (two-class met under both data-normalisation modes at the dated 0.55 bar, four-class not met); latent vs control indistinguishable across the gap; and the floor-aware circular reading, including the zero-parameter axis baseline matching the latent. | Tables 4.5–4.9 |
-| 4.4 The fidelity audit: where each domain writes territory | **The centrepiece.** For every ECG measurement, we compare how much infarct-location information it carries in the simulator versus in real patients. This produces a map of which measurements the simulator reproduces faithfully and which it does not; shows the mismatch is a systematic *relocation* (the simulator carries location in the ST segment, reality in the Q/R waves and the electrical axis); and demonstrates that how *realistic* a measurement looks does not predict whether it carries the right information. (Expanded in plain terms below the table.) | **Fig 1**, Tables 4.10–4.11 |
-| 4.5 The audit predicts which channels transfer | Per-block transfer, both modes; the simulator's strongest channel transporting at the chance floor while real informativeness ranks transport perfectly; recalibration repairs scale but not information; fitting on the simulator destroys a channel that works fit-free. | **Fig 2**, Table 4.12 |
-| 4.6 What transfers, what does not, and the limits of repair | Channel restriction does not beat the full latent; the one arm at parity (a 12-dimensional inferior-lead subspace, reported as parity, not a win); reweighting harms; the residual gap is at representation level; a closing statement that fixing it requires a better *simulator*, not a better encoder. | **Fig 3**, Table 4.13 |
+| 4.1 Adapting the model to the simulator | The trained models diagnose well on their own dataset but transfer only weakly to the other, and they are all very similar to each other - so the interesting question is not which model is best, but what information the model's summary contains. | Table 4.1 |
+| 4.2 The gap between simulator and real, and why the usual test misses it | A simple classifier can always tell simulator ECGs from real ones, however hard we try to align them; and a stress-test shows the usual "are they aligned?" check fails to notice even severe damage to the input. Conclusion: trying to align the two datasets is a dead end, and the real question is what information the model carries. | Tables 4.2-4.4, opt. Fig 4.4 |
+| 4.3 Reading infarct location: strong on the simulator, only partial on real data | On the simulator the model reads infarct location far better than the hand-crafted features. On real data, under a rule we fixed in advance, it gets the coarse region right (front vs bottom of the heart) but not the finer four-way split, and it does no better than the hand-crafted features - or even than a single clinical number. | Tables 4.5-4.9 |
+| 4.4 The fidelity audit: where each dataset stores infarct-location information | **The centrepiece.** For every ECG measurement, we compare how much infarct-location information it carries in the simulator versus in real patients. This produces a map of which measurements the simulator gets right and which it does not; it shows the mismatch is systematic (the simulator stores location in one family of measurements, real patients in a different family); and it shows that how realistic a measurement looks does not predict whether it carries the right information. Explained in plain terms just below this table. | **Fig 1**, Tables 4.10-4.11 |
+| 4.5 The audit predicts what transfers | We test the audit's predictions: the measurements it flags as unfaithful are exactly the ones that fail to carry over to real ECGs. The simulator's favourite measurement transfers no better than chance, while how useful a measurement is in real patients predicts its transfer almost perfectly. A simple recalibration helps a little but does not supply the missing information. | **Fig 2**, Table 4.12 |
+| 4.6 What does transfer, and why the failure cannot be patched | We try to repair the transfer two ways - keeping only the faithful measurements, and reweighting the simulator to resemble real data. Neither beats the full model, and reweighting makes it worse; the one restriction that ties the full model is small and specific. The conclusion: the missing information cannot be recovered after the fact - it needs a better simulator, not a better AI model. | **Fig 3**, Table 4.13 |
 
 **What Section 4.4 does, in plain terms** (the thesis's central section).
 We take the ~50 standard ECG measurements and, for each one, ask the same simple
-question in each domain separately: *how strongly does this measurement distinguish
-the four infarct territories?* Computing that once on the simulator and once on real
+question in each dataset separately: *how strongly does this measurement distinguish
+the four infarct regions?* Computing that once on the simulator and once on real
 patients gives two "informativeness scores" per measurement, and the section is
 built around comparing them. Five things come out of that comparison:
 
@@ -167,18 +166,18 @@ built around comparing them. Five things come out of that comparison:
    information about location in patients but are flat in the simulator (the
    simulator is effectively *blind* to them - mostly the Q/R waves and the electrical
    axis); others are the reverse, where the simulator relies on them but they carry
-   little in reality (the ST-segment leads). We list both, with confidence intervals.
+   little in reality (the ST-segment measurements). We list both, with error bars.
 
 2. **The mismatch is systematic, not scattered.** It is not that individual
    measurements are randomly off - whole *families* of measurements are swapped. The
-   simulator concentrates location information in the ST/T-wave family, while reality
-   concentrates it in the Q/R-wave family and the axis.
+   simulator concentrates location information in the ST/T-wave family, while real
+   patients concentrate it in the Q/R-wave family and the electrical axis.
 
 3. **A clean worked example - the electrical axis.** It varies just as much in the
    simulator as in real data (so the simulator has not simply frozen it), yet it
-   carries about 65 times less location information in the simulator than in reality,
-   and in real patients it points in the physiologically correct direction. This is
-   the single clearest number in the thesis.
+   carries about 65 times less location information in the simulator than in real
+   patients, and in real patients it points in the physiologically correct direction.
+   This is the single clearest number in the thesis.
 
 4. **The key evidence for the thesis's message.** How *realistic* a measurement looks
    - whether its distribution matches real data - does not predict whether it carries
@@ -187,41 +186,41 @@ built around comparing them. Five things come out of that comparison:
    what "realism is not informativeness" means, shown directly.
 
 5. **Why this happens, and an independent check.** The pattern fits a clinical
-   explanation - the simulator models *acute* (fresh) infarcts, which show in the ST
-   segment, whereas the real cohort is dominated by *old* infarcts, which show in the
-   Q/R waves - which we present as *consistent with* the data, not proven. And it
-   lines up with the dataset authors' own finding that clinicians correctly diagnosed
-   the simulated ECGs only 39% of the time versus 62% for real ones: the same deficit
-   they saw at the whole-ECG level, which our audit pins down measurement by
-   measurement.
+   explanation - the simulator models *acute* (fresh) infarcts, which show up in the
+   ST segment, whereas the real dataset is dominated by *old* infarcts, which show up
+   in the Q/R waves - which we present as the *likely* explanation, consistent with
+   the data rather than separately proven. It also lines up with the dataset authors'
+   own finding that clinicians correctly diagnosed the simulated ECGs only 39% of the
+   time versus 62% for real ones: the same shortfall they saw for the whole ECG,
+   which our audit pins down measurement by measurement.
 
-### Chapter 5 — Conclusion  (≈ 5 pp)
+### Chapter 5 - Conclusion  (~5 pp)
 
-| § | Content |
+| Section | What it will say |
 |---|---|
-| 5.1 Findings | One paragraph per contribution C1–C6 + M, each with its section and its honest strength. |
-| 5.2 What it means | For validating synthetic cohorts (the audit as a cheap, encoder-free pre-training gate); for MedalCare-XL's users and authors (which channels to trust, the Turing result explained at feature level). |
-| 5.3 Limitations | One simulator, one real cohort, one backbone family, one feature-extraction toolchain; the information measure is univariate; label-granularity differences between domains. |
-| 5.4 Future work | Framed as future, not as gaps. |
-| 5.5 Close | The registered question answered as far as one simulator, one cohort and one backbone allow. |
+| 5.1 What we found | One short paragraph per contribution, each stated with its honest strength (proven, well-supported, or consistent-with). |
+| 5.2 What it means | For anyone using a simulator to train a model: the audit is a cheap check to run first - it needs only the features and the labels, not the model. For the makers and users of this particular simulator: which measurements to trust, and their own clinician test explained measurement by measurement. |
+| 5.3 Limitations | Honest scope: one simulator, one real dataset, one family of models, one measurement toolkit; the information measure looks at one feature at a time; and the two datasets label infarcts at slightly different levels of detail. |
+| 5.4 Future work | Framed as opportunities, not gaps. |
+| 5.5 Closing | The original question answered as far as one simulator, one dataset and one model allow. |
 
-### Chapter 6 — Declarations  (≈ 3 pp)  — *drafted*
+### Chapter 6 - Declarations  (~3 pp)  - *already drafted*
 
-Required by the template: **Use of Generative AI** (a full, honest disclosure —
-this project used an AI coding assistant extensively for implementation, analysis
-scaffolding, and drafting, all verified by me; I take responsibility for every
-number and claim), **Ethical Considerations** (public de-identified datasets, no
-new data collection), **Sustainability** (compute footprint; all analysis is
-CPU-only over pre-computed representations, no retraining in the write-up phase),
-and **Availability of Data and Materials** (PTB-XL and MedalCare-XL are public; the
-code repository link).
+Required by the template: a full and honest **AI-use disclosure** (this project used
+an AI coding assistant heavily for writing code, running analyses, and drafting text,
+all checked by me - I take responsibility for every number and claim); **ethics**
+(public, de-identified datasets, no new data collected); **sustainability** (the
+compute used - all analysis runs on a CPU over already-computed results, with no
+model retraining during the write-up); and **data availability** (both datasets are
+public; a link to the code).
 
 ### Appendix
 
-The full 54-feature audit table; the superseded pre-fix result tables (flagged as
-such); the metric-floor and normalisation-sweep tables; the input-corruption sweep;
-the decision-rule label design; and a reproducibility section (seeds, commands,
-artifact map).
+The full table of all 54 audited features; the older results from before the
+data-loading fix (clearly flagged as superseded); the supporting statistics tables;
+the input stress-test; how the infarct-region labels were defined; and a
+reproducibility section (the exact settings and commands needed to regenerate every
+number).
 
 ---
 
