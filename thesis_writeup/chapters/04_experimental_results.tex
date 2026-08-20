@@ -6,11 +6,107 @@
 
 \section{Adapting ECGFounder to the digital twin}
 \label{sec:res-adapt}
-\todo{4.1 — exp8 family in-domain metrics (Table 4.1); the 2×2 design and what survives the fix (UNKNOWN); pre-fix numbers → Appendix A.2}
+% v0 DRAFT (D5). Numbers from outputs/<run>/metrics.json via dossier A §2.3.2. Plan: v3 §4.1.
+
+Adaptation works, and works similarly for every configuration. Table~\ref{tab:exp8} gives the test performance of the validated encoder family on the shared three-class task. The jointly trained runs sit within 0.02 of one another on both cohorts (MedalCare macro-F$_1$ 0.91--0.93, \ptbxl\ 0.82--0.83), the class-conditional MMD loss changes nothing that survives its own statistic, and the 64-dimensional bottleneck head gives up nothing in-domain. Classification does not discriminate between these designs. \tracenote{outputs/exp8_leadfix_*/metrics.json→best.test (A§2.3.2); ccMMD reduces its statistic 8-13 pct with nothing downstream (dossier B §3.3)}
+
+\begin{table}[tb]
+\centering\small
+\caption{The validated encoder family on the shared three-class task (test macro-F$_1$ and macro-AUC per cohort, from each run's saved metrics). The MedalCare-only encoder's \ptbxl\ column ($\ddagger$) is a passive read-out: that cohort never entered its loss, scheduler or checkpoint selection.}
+\label{tab:exp8}
+\begin{tabular}{lrrrr}
+\toprule
+ & \multicolumn{2}{c}{\medalcare} & \multicolumn{2}{c}{\ptbxl} \\
+run & F$_1$ & AUC & F$_1$ & AUC \\
+\midrule
+shared head & 0.928 & 0.998 & 0.828 & 0.940 \\
+shared head + ccMMD & 0.929 & 0.997 & 0.823 & 0.938 \\
+dual head, shared labels & 0.927 & 0.998 & 0.835 & 0.945 \\
+shared head, global-scalar z & 0.910 & 0.995 & 0.823 & 0.939 \\
+bottleneck $K=64$ & 0.952 & 0.997 & 0.832 & 0.944 \\
+shared head, MedalCare-only & 0.927 & 0.998 & 0.457$^\ddagger$ & 0.627$^\ddagger$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: A§2.3.2 rows exp8_leadfix_{baseline,ccmmd,dual,globalz,K64,medalonly}}
+
+The MedalCare-only row frames everything that follows. An encoder adapted purely on the twin classifies real ECGs at 0.457 without ever having seen one: far above the chance level of a three-class task, far below its 0.927 at home. Class-level knowledge crosses the gap in useful part. The question the rest of this chapter pursues is what happens to the finer, mechanistic content, and the encoder that answers it cleanly is this one, because its evaluation domain is untouched. \tracenote{A§2.3.2 medalonly row; §3.3 headline-encoder rationale}
+
+An observation from the earlier pipeline is recorded here as design history rather than as a result: with the pre-correction loaders, moving from separate per-domain heads to a single shared head roughly doubled a cross-domain class-transfer probe. Those numbers sit in Appendix~\ref{app:prefix} with their flag, and whether the effect survives the corrected pipeline was not re-tested; on the validated family the four jointly trained designs are indistinguishable in-domain, and no design claim is made. \tracenote{dossier B §2.2 (2x2); rerun plan: survival UNKNOWN; Appendix A.2}
+
+What Table~\ref{tab:exp8} establishes is deliberately modest: the encoders differ little in what they classify, so nothing downstream turns on the choice among them. The differences that matter live in what the latent carries, and because all six runs share one backbone, one adapter design and one seed, they are treated throughout as one representation observed under small perturbations, not as replicates. \tracenote{§3.3; decision doc §4 item 3}
 
 \section[The domain gap in the latent space]{The domain gap in the latent space: what it is made of, and why the standard detector misses it}
 \label{sec:res-align}
-\todo{4.2 — four attacks, C2ST 1.0 table; over-determination; withdrawn INLP frontier (linear vs GBDT); lead-order bug as an instrument episode; 77-cell sweep → corruption detector, not lead-order detector}
+% v0 DRAFT (D5). Numbers verified against dossier C Card G (c2st_leadfix.json, EXEC LOG §9.3b/§13.6),
+% Card F (leadperm_sweep.json), Card J (CORAL). Plan: v3 §4.2. Claim rows: P6', P6''.
+
+However the two cohorts are loaded, and however the encoder is trained, a held-out linear domain classifier tells their latents apart perfectly. Table~\ref{tab:threecond} shows the cleanest version of the fact: on one frozen encoder, correcting the lead order and then the normalisation reduces the kernel distance between the domains by 18\,\% and quadruples the nearest-neighbour mixing rate, while the classifier's AUROC does not move from 1.0000. The same value recurs on all five validated encoders (kernel distances 0.134--0.321; C2ST 1.0000 throughout). Distance statistics and separability are measuring different things, and it is separability that refuses to move. \tracenote{outputs/analysis/leadswap_diag/c2st_leadfix.json; repo audit §5; EXEC LOG §9.3b five-encoder table (Card G)}
+
+\begin{table}[tb]
+\centering\small
+\caption{Loader corrections move distances, not separability (frozen pre-correction encoder; MedalCare test $n=2{,}386$ vs \ptbxl\ test $n=2{,}198$, domain-balanced; C2ST scored on untouched test pools). MMD$^2$ is the unbiased multi-bandwidth estimate; kNN mixing is the cross-domain fraction among $k=10$ neighbours.}
+\label{tab:threecond}
+\begin{tabular}{lrrr}
+\toprule
+MedalCare loading condition & held-out C2ST & MMD$^2$ & kNN mixing \\
+\midrule
+as shipped (transposed leads, global z) & 1.0000 & 0.176 & 0.003 \\
+corrected lead order, global z & 1.0000 & 0.166 & 0.005 \\
+corrected lead order, per-lead z & 1.0000 & 0.145 & 0.011 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: c2st_leadfix.json (0.17568/0.16604/0.14471; 0.0026/0.0049/0.0109); Card G}
+
+Four families of alignment attempt end at the same value. Training-time MMD, class-agnostic and class-conditional, reduces its own loss statistic by 8--13\,\% and leaves held-out C2ST at 1.0; post-hoc nullspace projection is treated in the next paragraph; projecting the latents to as few as eight principal components leaves a non-linear C2ST above 0.99; and a bottleneck trained end-to-end at $K=16$ behaves the same. These are appendix material individually (Appendix~\ref{app:prefix}); their joint content is that first-order distances, linear structure and dimensionality can each be manipulated freely without the two distributions becoming confusable. \tracenote{dossier B §2.3-2.4; Card G withdrawn dim_scan readings (GBDT 0.9948-0.9968); EXEC LOG}
+
+The nullspace-projection episode is reported in detail because it produced the chapter's methodological rule. Iteratively removing the directions a linear domain classifier finds drives the held-out \emph{linear} C2ST from 1.0000 to 0.5001, chance, and the first reading of that number was that the domains had been aligned at a cost in transfer. The reading was withdrawn when the detector was changed: on the same projected latents a gradient-boosted classifier reads 0.9987--0.9999. Instrument and intervention shared a blind spot, since both were linear. With a non-linear detector on the axis there is no alignment--transfer trade-off to negotiate: the C2ST frontier is flat from zero to 160 removed directions while transfer falls to chance, and a rank-matched random projection holds transfer near 0.70 throughout, so the fall is specific, not capacity loss. The rule this fixed, applied throughout the thesis, is that a linear probe licenses only claims about linear structure. \tracenote{Card G items 2-4 (0.5001; GBDT 0.9987/0.9999; flat frontier; random control 0.70; specificity gap +0.4999)}
+
+The gap is over-determined. Destroying the dependence structure of the latents while keeping every marginal leaves a non-linear classifier at 0.9999; destroying every marginal while keeping the dependence structure leaves it at 0.9993; destroying both drops it to 0.5032, confirming the floor behaves. This holds on all six checkpoints down to $K=16$, where the sharpest single contrast in the project sits: after nullspace projection the linear C2ST reads 0.5808 while a gradient-boosted classifier reads 0.9968 from the dependence structure alone, with every marginal destroyed. There is no single defect to remove; marginals and dependence each suffice to give the domains away. A label-shift explanation is separately excluded by a lower-bound argument, and the directions the projection removes carry no clinical or biophysical signal (every excess $R^2$ against the hand-crafted features and against $\thetavec$ is negative); the details are in Appendix~\ref{app:prefix}. \tracenote{Card G item 6 (domain_mechanism_replication: 0.9999/0.9993/0.5032, 6/6; K16 0.5808 vs 0.9968) and item 8 (label-shift bound slack +0.073; excess R2 all negative)}
+
+\begin{table}[tb]
+\centering\small
+\caption{The gap is over-determined (non-linear C2ST on raw latents, six checkpoints; means over checkpoints with the worst case in parentheses). Either the marginals or the dependence structure alone suffices for near-perfect separation.}
+\label{tab:overdet}
+\begin{tabular}{lr}
+\toprule
+condition & held-out C2ST \\
+\midrule
+latents as-is & $\geq 0.9998$ \\
+marginals destroyed, dependence kept & 0.9993 (min 0.9968) \\
+dependence destroyed, marginals kept & 0.9999 (min 0.9997) \\
+both destroyed (floor check) & 0.5032 (max 0.5197) \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: Card G item 6, domain_mechanism_replication.py outputs}
+
+If the detector is this sensitive, does it at least detect things that matter? The loader corrections of \S\ref{sec:preproc} gave one instrument test for free. On the frozen pre-correction encoder, territory transfer under the corrected loading scores 0.328 against 0.213 as shipped, with the two mismatched conditions falling in between and the interaction carrying the right sign; that movement is consistent with the correction, and it is not treated as proof of it, for the reason the next experiment supplies. \tracenote{lead-order diagnostic §2-4 (0.2132 p=0.756 / 0.3278 p=0.0020, involution 2x2 on frozen exp7_baseline; P1-style probe)}
+
+The 77-cell sweep asks the question systematically: apply the identity, all 66 pairwise lead transpositions, and ten random full permutations to the real test signals at inference, with the territory probe fitted once on the simulator and never refit, and watch what each diagnostic does (Table~\ref{tab:sweep}). Transfer spans a factor of two across cells (macro-F$_1$ 0.162--0.320), and across that range the linear C2ST moves by $10^{-5}$ and the gradient-boosted C2ST by $9\times10^{-5}$, correlating with damage at $\rho = -0.04$ and $-0.03$: a detector pinned at its ceiling ranks a physiological domain gap and a channel-swapped recording identically. Transfer itself detects gross corruption (seven of ten random permutations fall below the identity's confidence interval) and misses fine corruption entirely: not one of the 66 transpositions falls below the identity's interval, 39 of 66 score above the correctly ordered cell, and the transposition that the historical loader defect implemented ranks 70th of 77 by damage. The kernel distance separates random permutations from transpositions cleanly but does not track harm within transpositions ($\rho=-0.15$, $p=0.20$): it flags change, not damage. Two conclusions carry forward. Cross-domain transfer is a corruption detector, not a lead-order detector, which is why the loader corrections rest on the physical identity check and not on the transfer movement above; and every diagnostic in routine use here is blind to something a reader would assume it sees. \tracenote{leadperm_sweep.json + Card F (spread 0.0929; C2ST spreads 1e-5/9e-5; rho -0.040/-0.031; randoms 7/10 below CI [0.2162,0.3011], 0/10 p<0.05; 0/66 below, 39/66 above; historical cell rank 70/77; MMD rho -0.146 p=0.20; identity p=0.1139)}
+
+\begin{table}[tb]
+\centering\small
+\caption{The 77-cell lead-permutation sweep (real test signals permuted at inference; probe fitted once on the simulator, never refit; $n=438$ per cell). Diagnostics that should rank damage do not: both C2STs are pinned at their ceiling across a two-fold range in transfer.}
+\label{tab:sweep}
+\begin{tabular}{lrrrr}
+\toprule
+cell class & $n$ & mean macro-F$_1$ & range & mean MMD$^2$ \\
+\midrule
+identity & 1 & 0.260 & --- & 0.178 \\
+limb--limb transpositions & 15 & 0.280 & 0.259--0.320 & 0.201 \\
+limb--precordial transpositions & 36 & 0.258 & 0.227--0.285 & 0.194 \\
+precordial--precordial transpositions & 15 & 0.256 & 0.231--0.287 & 0.195 \\
+random full permutations & 10 & 0.201 & 0.162--0.225 & 0.267 \\
+\midrule
+\multicolumn{5}{l}{linear C2ST: min 1.0000, spread $10^{-5}$; gradient-boosted C2ST: min 0.9999, spread $9\times10^{-5}$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{Table: Card F class breakdown (0.2599/0.2802/0.2584/0.2561/0.2012; MMD 0.1778/0.2014/0.1940/0.1945/0.2673); pre-declared thresholds fired SUPPORTED}
+
+One distribution-level intervention does buy something, and naming what it buys sets up the rest of the chapter. Per-column re-standardisation of the latents on unlabelled target statistics, diagonal CORAL, recovers $+0.065 \pm 0.020$ of cross-domain class transfer across checkpoints and seeds, saturating with fifty unlabelled target records, while its full-covariance version at rank 128 loses 0.27, and the linear C2ST it drives to 0.5000 is read at 1.0000 by the gradient-boosted detector. Rescaling coordinates helps; nothing about the distributions has been aligned. That is the shape of everything that follows: the operations that move distances or rescale coordinates leave the two representations as distinguishable as before, so the productive question is not how to make the distributions match but what information the latent carries about territory in each domain, which is where the audit of \S\ref{sec:res-audit} and the decoding results of \S\ref{sec:res-decode} take over. \tracenote{Card J CORAL block (+0.0645 +/- 0.020, 3 ckpt x 5 seeds; saturation at 50; full CORAL r=128 -0.27; linear 0.5000 vs GBDT 1.0000; split-half control -0.0008)}
 
 \section[Territory decoding in and across domains]{Territory decodes in-domain, and partially across the gap}
 \label{sec:res-decode}
