@@ -84,3 +84,11 @@ log everything. No new experiments.
 - **Ch1 Introduction drafted** (12 ¶, ~1,070 words): motivation (twins + FMs → the implicit assumption → the 62/39 warning → stakes); the question as registered and its three-part answer; contributions as the 7-item findings-first list, each naming its section; two disciplines (both modes; paired tests); outline.
 - Style pass: em-dash 0, not-but reduced, lexicon clean; paragraph variance fixed in Ch2. One checker false-positive fixed (the word "unverified" inside the Jammalamadaka bib comment referred to the omitted page range).
 - Build 59 pp, 0 errors, 0 bibtex warnings, no hard failures. Remaining \todo: abstract, acknowledgments, Ch5, appendices A.2–A.6, 2 Declarations facts.
+
+## D7 — session log
+- **Ch5 Conclusion drafted** (5 sections): findings against the ladder with strength words (measured / consistent-with / declared-open); "what this means" as prescription (the audit as a pre-training gate) and as a work order for simulator builders ("nothing in this thesis argues against digital twins; it argues for validating them on the information a task needs"); full limitations list from the guide; future work framed as tests the audit makes precise (incl. the acute-cohort test the map predicts); closing statement ("Interpreting the latent space, it turned out, meant auditing the twin").
+- **Abstract drafted** (S1–S8, ~300 words; only the +0.15, endpoint verdicts, 28/14 counts and the 12-d subspace as numbers).
+- **Acknowledgments drafted** (short, factual; \todo for owner to personalise).
+- **Appendices A.2–A.6 drafted**: A.2 superseded-results table (AP era → 2×2 AUC → bottlenecks → Tier-2 → Phase-B2 → May Track 3 → INLP → dim-scan, all flagged); A.3 α-grid pointer + 12/12 label-free-below-floor + anchor ranks 7–11/24; A.4 sweep supplements + INLP protocol + label-shift/subspace-content exclusions; A.5 SCP rule in full + folder-label ceiling + scaler-mode documentation; A.6 reproducibility (tags, seeds, RNG discipline, artifact map, two recorded gaps).
+- Tracenotes added for restated numbers (abstract, Ch5, rule quote, blind-spot ¶). Build 62 pp, 0 errors, no hard failures. Remaining \todo: acknowledgments personalisation (owner) + 3 Declarations facts (owner: ethics wording, licences, artifact-commit decision).
+- **Full draft v1 exists. Ready for the supervisor.**
