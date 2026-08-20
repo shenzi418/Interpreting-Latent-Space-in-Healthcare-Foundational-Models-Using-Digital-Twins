@@ -100,3 +100,9 @@ log everything. No new experiments.
 - Mechanical: 0 build errors, **0 overfull hboxes**, 0 undefined references (one harmless font-shape warning), checker no hard failures.
 - **Data audit**: Table 4.1 re-verified programmatically against the six metrics.json files — exact match, 24/24 cells.
 - Visual: abstract, A.2 table, Ch2 pages rendered and inspected; appendix section short-marks added to stop running-head overlap.
+
+## Vocabulary rescreen (owner request, 2026-08-24)
+- Searched current corpus-based lists (isitslop.io compilation of the 15M-PubMed-abstract study; Conversation piece; COLING-2025 focal words). Extended notes/style_lexicon.txt with 31 new patterns (thereby, subsequently, ultimately, conversely, interplay, insights, myriad, facilitate, utilise, whilst, akin to, sheds light, paves the way, boasts, emphasising, enhancing, ensuring, in summary/conclusion, …).
+- Full-thesis scan against the extended list: **3 hits only**. Fixed 2: "thereby over-sell it" → ", and so over-sell it" (Declarations); "Emphasising the rows…" → "Giving more weight to the rows…" + sentence split (§4.6). Kept 1 after adjudication: "robust×2" — both are the statistical sense with the test named (T-block removal flip; scaler-mode sensitivity), which the writing guide permits.
+- Secondary sweep for filler intensifiers/phrases (very, clearly, in order to, a number of, aims to, aforementioned, significant(ly), essentially…): 6 hits, 2 fixed ("very large recording corpora" → "corpora of millions of recordings"; "nominally significantly" → "with nominal significance"), 4 kept as legitimate statistical usage ("looks significant under a naive test (p=0.009)", "significantly below the constant floor" (CI-based), "carries essentially no territory information" (η²=0.002)).
+- Build 63 pp, 0 errors; checker: no hard failures; only lexicon residue is the adjudicated statistical "robust".

@@ -55,3 +55,36 @@
 \bboth\b.{0,40}\band\b.{0,20}\balike\b
 \bnot (only|just|merely) .{1,60} but (also )?\b
 \brobust(ly)?\b
+# --- additions 2026-08-24, from isitslop.io / PubMed-corpus lists (report-only; adjudicate in context) ---
+\bthereby\b
+\bsubsequently\b
+\bultimately\b
+\bconversely\b
+\belevat(e|es|ed|ing)\b
+\bgarner(s|ed|ing)?\b
+\binsights?\b
+\bnuances\b
+\badvancements?\b
+\bendeavou?rs?\b
+\binterplay\b
+\bmyriad\b
+\bplethora\b
+\belucidat(e|es|ed|ing)
+\bfacilitat(e|es|ed|ing)
+\billuminat(e|es|ed|ing)
+\butili[sz](e|es|ed|ing|ation)
+\bin (summary|conclusion)\b
+\bakin to\b
+\bwhilst\b
+\bparamount\b
+\bmultifaceted\b
+\bburgeoning\b
+\bever-evolving\b
+\bsheds? light\b
+\bpaves? the way\b
+\bembark(s|ed|ing)?\b
+\bboasts?\b
+\bvibrant\b
+\bemphasi[sz](e|es|ed|ing|s)\b
+\benhanc(e|es|ed|ing)
+\bensuring\b
