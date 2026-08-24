@@ -26,6 +26,7 @@
 | Habit | What to do instead |
 |---|---|
 | **Negative parallelism**: "not X but Y", "not just X, it is Y", "X, not Y" as a rhetorical device | Say Y. Use "not X" only when the reader would otherwise assume X and it must be denied explicitly — and then at most once per section. |
+| **Enumerative setup**: "The value of X is twofold." / "Three things follow." before a list | Give the items directly; the count announces itself. (Caught by the structural scan 2026-08-24; triads and balanced semicolon sequences are the cadence that survives vocabulary filters.) |
 | **Rule of three**: three adjectives, three clauses, three examples by reflex | Use the number of items the content has. Two is fine. Four is fine. |
 | **Em dashes** as the default connective (my own habit) | Target ≤ 1 per 200 words. Prefer a full stop, a comma, a colon, or parentheses. Keep the dash for a genuine interruption. |
 | **Copula avoidance**: "serves as", "stands as", "represents", "functions as", "constitutes" | "is". |
