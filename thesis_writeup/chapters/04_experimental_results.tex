@@ -23,7 +23,7 @@ shared head & 0.928 & 0.998 & 0.828 & 0.940 \\
 shared head + ccMMD & 0.929 & 0.997 & 0.823 & 0.938 \\
 dual head, shared labels & 0.927 & 0.998 & 0.835 & 0.945 \\
 shared head, global-scalar z & 0.910 & 0.995 & 0.823 & 0.939 \\
-bottleneck $K=64$ & 0.952 & 0.997 & 0.832 & 0.944 \\
+bottleneck $K=64$ & 0.952 & 0.997 & 0.832 & 0.943 \\
 shared head, MedalCare-only & 0.927 & 0.998 & 0.457$^\ddagger$ & 0.627$^\ddagger$ \\
 \bottomrule
 \end{tabular}
@@ -57,7 +57,7 @@ corrected lead order, per-lead z & 1.0000 & 0.145 & 0.011 \\
 \bottomrule
 \end{tabular}
 \end{table}
-\tracenote{Table: c2st_leadfix.json (0.17568/0.16604/0.14471; 0.0026/0.0049/0.0109); Card G}
+\tracenote{Table rows 1,3: c2st_leadfix.json (as_shipped 0.17568/0.0026; leadfix+perlead 0.14471/0.0109). Row 2 (leadfix, global z: 1.0000/0.16604/0.0049): repo audit 2026-08-10 sec5 table line 299; Card G}
 
 Four families of alignment attempt end at the same value. Training-time MMD, class-agnostic and class-conditional, reduces its own loss statistic by 8--13\,\% and leaves held-out C2ST at 1.0; post-hoc nullspace projection is treated in the next paragraph; projecting the latents to as few as eight principal components leaves a non-linear C2ST above 0.99; and a bottleneck trained end-to-end at $K=16$ behaves the same. These are appendix material individually (Appendix~\ref{app:prefix}); their joint content is that first-order distances, linear structure and dimensionality can each be manipulated freely without the two distributions becoming confusable. \tracenote{dossier B §2.3-2.4; Card G withdrawn dim_scan readings (GBDT 0.9948-0.9968); EXEC LOG}
 
