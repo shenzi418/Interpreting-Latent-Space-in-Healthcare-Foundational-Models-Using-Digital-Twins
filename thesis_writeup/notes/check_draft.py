@@ -161,6 +161,7 @@ for f in files:
     # sentence lengths
     sents = [s for s in re.split(r"(?<=[.!?])\s+", prose) if len(s.split()) >= 3]
     sl = [len(s.split()) for s in sents]
+    n_long = sum(1 for n in sl if n > 40)  # over-long sentences: a per-sentence AI/readability tell
     import statistics as st
     sl_mean = st.mean(sl) if sl else 0
     sl_sd = st.pstdev(sl) if len(sl) > 1 else 0
@@ -173,7 +174,8 @@ for f in files:
         for m in rx.finditer(prose):
             lex_hits.append(m.group(0))
     print(f"  {f}: words={nw}  em-dash/1k={em/kw:.1f}  not-but/1k={notbut/kw:.1f}  participle-tails={part_tail}  triplets={trip}  "
-          f"sent-init-adverbs={sent_init}  bold-in-prose={bold}  'we'={we}  sent len {sl_mean:.1f}±{sl_sd:.1f} (sd/mean {sl_sd/max(sl_mean,1):.2f})  para-cv={pl_cv:.2f} (n={len(pl)})")
+          f"sent-init-adverbs={sent_init}  bold-in-prose={bold}  'we'={we}  sent len {sl_mean:.1f}±{sl_sd:.1f} (sd/mean {sl_sd/max(sl_mean,1):.2f})  "
+          f"long>40w={n_long}/{len(sl)} (max {max(sl) if sl else 0})  para-cv={pl_cv:.2f} (n={len(pl)})")
     if lex_hits:
         from collections import Counter
         c = Counter(h.lower() for h in lex_hits)
@@ -185,6 +187,7 @@ for f in files:
     if bold: flags.append("bold in prose")
     if we: flags.append("'we' outside Declarations")
     if sl and sl_sd / max(sl_mean, 1) < 0.35: flags.append("sentence lengths too uniform")
+    if sl and n_long / len(sl) > 0.08: flags.append(f"over-long sentences: {n_long}/{len(sl)} exceed 40 words")
     if len(pl) > 3 and pl_cv < 0.35: flags.append("paragraph lengths too uniform")
     if flags:
         print("     FLAGS:", "; ".join(flags))
