@@ -111,3 +111,10 @@ log everything. No new experiments.
 - Experiment naming: descriptive names in all prose/captions (shared-head / dual-head / MedalCare-only encoder; phase table rows renamed with {repository: ...} tags); repository ids now appear only in Table 3.3 (declared as the reproducibility mapping), Appendix, tracenotes. Twelve-cell grid encoder column: joint / MC-only.
 - Overfull sweep (earlier count was wrong due to a mis-escaped grep — recorded): fixed the real offenders — Declarations URLs via xurl (292pt/75pt); A.1 longtable via scriptsize+tabcolsep (59.7pt×4); Table 3.5 colspec P{4.6cm} + header shortening (185→0); Table 4.2 (track3) P-verdict column + t_pool_measured abbreviation (32pt); Table 4.9 header shortening (34.6pt); sweep-table labels (transp.); latents path via \path; freezing-bug footnote break; \emergencystretch=1.2em for the hyphenation tail. Remaining: 7 overfulls ≤13.5pt (≤4.8mm; largest in the sweep table area) — final-polish list.
 - Lesson re-recorded the hard way: NEVER patch LaTeX via bash heredocs; script files only.
+
+## Supervisor reply incorporated (2026-08-24)
+- Marta approved the structure ("no major comments") → N2 (question-logic order) and N5 (grid in main text) closed; scope/length stand. Q1b remains open (both-modes discipline continues).
+- Her ask 1 — real-life impact: two sentences added in §1.1 (physiological interpretability of mechanistic readouts; small-data/rare-condition regime) and one in §5.2 (the pay-off of repairing the flagged channels), using her own two terms.
+- Her ask 2 — generic ML textbook anchor: Goodfellow, Bengio & Courville, Deep Learning (MIT Press 2016) verified against the MIT Press record (papersflow OAuth was erroring; book not in DOI databases anyway) and cited at §1.1 ("used in their textbook sense") and §3.3 (architecture family, \citealp).
+- Post-thesis plan noted in v3: abstract for European ICLR (mid/late Sept) agreed in principle; fallbacks ICLR workshop / her MICCAI-affiliated cardiology conference (London, June 2027); interaction with ML4H Findings (Sep 10) to be raised in the owner's reply.
+- Build 66 pp, 0 errors, checker clean. 40 bib entries.
