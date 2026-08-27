@@ -46,11 +46,11 @@ for f in feats:
                      yr=f["eta2_4c_real"], ylo=f["eta2_4c_real_ci"][0], yhi=f["eta2_4c_real_ci"][1],
                      verdict=("blind spot" if f["name"] in blind else "spurious" if f["name"] in spur else "")))
 
-fig, ax = plt.subplots(figsize=(8.2, 6.0))
+fig, ax = plt.subplots(figsize=(7.0, 5.6))
 lim = 0.36
 ax.plot([0, lim], [0, lim], color="#9a9a94", lw=1, ls="--", zorder=1)
 ax.text(0.155, 0.175, r"$\eta^2_{\mathrm{real}}=\eta^2_{\mathrm{sim}}$", ha="right", va="bottom",
-        fontsize=8, color="#6f6f69", rotation=45, rotation_mode="anchor")
+        fontsize=9, color="#6f6f69", rotation=45, rotation_mode="anchor")
 
 for key, label, col, mk in BLOCKS:
     sub = [r for r in rows if r["block"] == key]
@@ -74,46 +74,46 @@ def lab(name, dx, dy, ha="left"):
     if r is None:
         return
     ax.annotate(name.replace("_", "\\_") if False else name, (r["xs"], r["yr"]), xytext=(dx, dy),
-                textcoords="offset points", fontsize=7.5, ha=ha, color="#333",
+                textcoords="offset points", fontsize=8.5, ha=ha, color="#333",
                 arrowprops=dict(arrowstyle="-", color="#999", lw=0.6))
 lab("Q_amp_III", 10, -2)
 lab("Q_amp_aVF", 10, -2)
 lab("Q_amp_II", 14, 6)
 lab("R_amp_aVL", 18, -14)
 lab("R_amp_III", 18, 0)
-lab("ST_J60_aVF", 4, -14)
+lab("ST_J60_aVF", -12, -6, ha="right")
 lab("ST_J60_I", 4, 8)
 lab("T_amp_V4", 8, 4)
 lab("QRS_duration_ms", 10, -6)
 ax.annotate("frontal QRS axis", (axis["eta2_4c_sim"], axis["eta2_4c_real"]), xytext=(4, -34),
-            textcoords="offset points", fontsize=8, color="#222", fontweight="bold",
+            textcoords="offset points", fontsize=9, color="#222", fontweight="bold",
             arrowprops=dict(arrowstyle="-", color="#999", lw=0.6))
 
 # region annotations
-ax.text(0.0009, 0.30, "real-informative, sim-flat:" + chr(10) + "blind spots (28 + axis)", fontsize=8, color="#555", va="top", ha="left")
-ax.text(0.30, 0.0004, "sim-informative, real-flat:" + chr(10) + "spurious (14 columns)", fontsize=8, color="#555", ha="right", va="bottom")
+ax.text(0.0009, 0.30, "real-informative, sim-flat:" + chr(10) + "blind spots (28 + axis)", fontsize=9, color="#555", va="top", ha="left")
+ax.text(0.30, 0.0004, "sim-informative, real-flat:" + chr(10) + "spurious (14 columns)", fontsize=9, color="#555", ha="right", va="bottom")
 
 # square-root scale on both axes: spreads the dense low-eta^2 cluster; the diagonal remains y = x
 fwd = lambda v: np.sqrt(np.clip(v, 0, None)); inv = lambda v: np.square(v)
 ax.set_xscale("function", functions=(fwd, inv)); ax.set_yscale("function", functions=(fwd, inv))
 ticks = [0, 0.005, 0.02, 0.05, 0.1, 0.2, 0.3]
 ax.set_xticks(ticks); ax.set_yticks(ticks)
-ax.set_xticklabels([str(t) for t in ticks], fontsize=8); ax.set_yticklabels([str(t) for t in ticks], fontsize=8)
+ax.set_xticklabels([str(t) for t in ticks], fontsize=9.5); ax.set_yticklabels([str(t) for t in ticks], fontsize=9.5)
 ax.set_xlim(0, lim); ax.set_ylim(0, lim)
 ax.set_aspect("equal")
-ax.set_xlabel("territory information in MedalCare-XL   ($\\eta^2$ vs 4-class territory, 500-draw run-block bootstrap 95% CI)")
-ax.set_ylabel("territory information in PTB-XL   ($\\eta^2$ vs 4-class territory, patient-block bootstrap 95% CI)")
-ax.xaxis.label.set_size(8.5); ax.yaxis.label.set_size(8.5)
+ax.set_xlabel("territory information in MedalCare-XL   ($\\eta^2$ against 4-class territory)")
+ax.set_ylabel("territory information in PTB-XL   ($\\eta^2$ against 4-class territory)")
+ax.xaxis.label.set_size(9.5); ax.yaxis.label.set_size(9.5)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
 ax.grid(True, color="#ececea", lw=0.6, zorder=0)
 ax.set_axisbelow(True)
-leg = ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False, handletextpad=0.4, borderaxespad=0.0, title="feature block", title_fontsize=8)
-ax.set_title("Per-feature informativeness fidelity: 53 ECG features + the frontal QRS axis", fontsize=10, loc="left")
+leg = ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9, frameon=False, handletextpad=0.4, borderaxespad=0.0, title="feature block", title_fontsize=9)
+ax.set_title("Per-feature informativeness fidelity: 53 ECG features + the frontal QRS axis", fontsize=10.5, loc="left")
 fig.tight_layout()
 os.makedirs(OUT_DIR, exist_ok=True)
-fig.savefig(os.path.join(OUT_DIR, "fig1_eta2_scatter.pdf"))
-fig.savefig(os.path.join(OUT_DIR, "fig1_eta2_scatter.png"), dpi=150)
+fig.savefig(os.path.join(OUT_DIR, "fig1_eta2_scatter.pdf"), bbox_inches="tight", pad_inches=0.03)
+fig.savefig(os.path.join(OUT_DIR, "fig1_eta2_scatter.png"), dpi=150, bbox_inches="tight", pad_inches=0.03)
 
 # trace table
 with open(os.path.join(OUT_DIR, "fig1_points.csv"), "w", newline="") as fh:
