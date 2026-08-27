@@ -2,7 +2,7 @@
 \chapter{Supplementary tables and reproducibility}
 \label{app:supp}
 
-Results presented earlier in the project, including at the June poster session, were obtained with the earlier pipeline iterations described in \S\ref{sec:preproc}; this appendix lists them together with their status after the corrections. The qualitative conclusions that survived are stated in the main text with corrected values. One poster figure is retracted outright: the cross-domain confusion pattern in which 77\,\% of inferior infarcts were assigned to the anteroseptal class was traced to the transposed limb leads in the synthetic loader (151 of 196 records before the correction, 44 of 196 after), and the corrected confusion structure appears in \S\ref{sec:res-decode}. \tracenote{reports/2026-08-10_repo_audit_and_rerun_plan.md:119-120; notes/poster_reconciliation.md}
+Results presented earlier in the project, including at the June poster session, were obtained with earlier iterations of the data-loading code. Those iterations differed from the conventions of \S\ref{sec:preproc} in three ways: lead order was taken positionally, which transposed aVL and aVF on the synthetic side; a single global-scalar z-score stood in place of the per-lead one; and the real-side class filter kept a different superclass. The current loaders satisfy the limb-lead identities $\mathrm{aVL}=(\mathrm{I}-\mathrm{III})/2$ and $\mathrm{aVF}=(\mathrm{II}+\mathrm{III})/2$ on the loaded signals in both domains; the earlier synthetic loader did not. This appendix lists the earlier results together with their status after the corrections. The qualitative conclusions that survived are stated in the main text with corrected values. One poster figure is retracted outright: the cross-domain confusion pattern in which 77\,\% of inferior infarcts were assigned to the anteroseptal class was traced to the transposed limb leads in the synthetic loader (151 of 196 records before the correction, 44 of 196 after), and the corrected confusion structure appears in \S\ref{sec:res-decode}. \tracenote{reports/2026-08-10_repo_audit_and_rerun_plan.md:119-120; notes/poster_reconciliation.md}
 
 \section{The full audit table}
 \input{chapters/A1_audit_table}
@@ -61,7 +61,7 @@ Table~\ref{tab:runmap} maps every descriptive run name used in the text to its r
 
 \begin{table}[h]
 \centering\small
-\caption{Run-name mapping: every fine-tuning run, its repository identifier and configuration. The validated family carries every Chapter~\ref{ch:results} result (Table~\ref{tab:runs}); the earlier families' results are in \S\ref{app:prefix}, and their hyper-parameters, never written to disk, are given from the run conventions.}
+\caption{Run-name mapping: every fine-tuning run, its repository identifier and configuration. The \texttt{exp8\_leadfix} family carries every Chapter~\ref{ch:results} result (Table~\ref{tab:runs}); the earlier families' results are in \S\ref{app:prefix}, and their hyper-parameters, never written to disk, are given from the run conventions.}
 \label{tab:runmap}
 \begin{tabular}{P{3.4cm}P{5.0cm}P{4.6cm}}
 \toprule
@@ -75,7 +75,7 @@ shared-head & \texttt{exp7\_baseline}; \texttt{exp7\_ccmmd} & joint shared-head,
 bottlenecks & \texttt{exp7\_bottleneck\_}\newline\texttt{K16/K64/K256} & bottleneck head on \texttt{exp7\_baseline} \\
 multitask bottleneck & \texttt{exp7\_tier2\_K64\_A}; \texttt{\_B} & $\lambda_{\mathrm{cls}},\lambda_{\mathrm{bio}}$ = 0.5, 0.5; 0, 1; $K=64$ \\
 \midrule
-\multicolumn{3}{l}{\emph{validated family (results throughout Chapter~\ref{ch:results})}}\\[1pt]
+\multicolumn{3}{l}{\emph{\texttt{exp8\_leadfix} family (results throughout Chapter~\ref{ch:results})}}\\[1pt]
 shared-head & \texttt{exp8\_leadfix\_baseline} & joint shared-head, three classes \\
 shared-head + ccMMD & \texttt{exp8\_leadfix\_ccmmd} & ccMMD $\lambda=0.1$ \\
 dual-head & \texttt{exp8\_leadfix\_dual} & joint dual-head, shared labels \\
