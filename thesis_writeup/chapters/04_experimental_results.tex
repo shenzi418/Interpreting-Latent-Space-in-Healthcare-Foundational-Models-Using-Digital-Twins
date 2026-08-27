@@ -12,7 +12,7 @@ Adaptation works, and works similarly for every configuration. Table~\ref{tab:ex
 
 \begin{table}[tb]
 \centering\small
-\caption{The encoder family on the shared three-class task (test macro-F$_1$ and macro-AUC per cohort, from each run's saved metrics). The MedalCare-only encoder's \ptbxl\ column ($\ddagger$) is a passive read-out: that cohort never entered its loss, scheduler or checkpoint selection.}
+\caption{The encoder family on the shared three-class task: test macro-F$_1$ and macro-AUC per cohort. The MedalCare-only encoder's \ptbxl\ column ($\ddagger$) is a passive read-out: that cohort never entered its loss, scheduler or checkpoint selection.}
 \label{tab:exp8}
 \begin{tabular}{lrrrr}
 \toprule
@@ -43,7 +43,7 @@ However the two cohorts are loaded, and however the encoder is trained, a held-o
 
 \begin{table}[tb]
 \centering\small
-\caption{Loading configuration moves distances, not separability (one frozen encoder from the earlier family; MedalCare test $n=2{,}386$ vs \ptbxl\ test $n=2{,}198$, domain-balanced; C2ST scored on untouched test pools). MMD$^2$ is the unbiased multi-bandwidth estimate; kNN mixing is the cross-domain fraction among $k=10$ neighbours.}
+\caption{Loading configuration moves distances, not separability. One frozen encoder from the earlier family; MedalCare test $n=2{,}386$ against \ptbxl\ test $n=2{,}198$, domain-balanced. MMD$^2$ is the unbiased multi-bandwidth estimate; kNN mixing is the cross-domain fraction among ten neighbours.}
 \label{tab:threecond}
 \begin{tabular}{lrrr}
 \toprule
@@ -65,7 +65,7 @@ The gap is over-determined. Destroying the dependence structure of the latents w
 
 \begin{table}[tb]
 \centering\small
-\caption{The gap is over-determined (non-linear C2ST on raw latents, six checkpoints; means over checkpoints with the worst case in parentheses). Either the marginals or the dependence structure alone suffices for near-perfect separation.}
+\caption{The gap is over-determined: non-linear C2ST on raw latents across six checkpoints, means with the worst case in parentheses. Either the marginals or the dependence structure alone suffices for near-perfect separation.}
 \label{tab:overdet}
 \begin{tabular}{lr}
 \toprule
@@ -86,7 +86,7 @@ The lead-permutation sweep of \S\ref{sec:align-method} asks the question systema
 
 \begin{table}[tb]
 \centering\small
-\caption{The 77-cell lead-permutation sweep (real test signals permuted at inference; probe fitted once on the simulator, never refit; $n=438$ per cell). Diagnostics that should rank damage do not: both C2STs are pinned at their ceiling across a two-fold range in transfer.}
+\caption{The 77-cell lead-permutation sweep of \S\ref{sec:align-method} ($n=438$ per cell). Both C2STs are pinned at their ceiling across a two-fold range in transfer.}
 \label{tab:sweep}
 \begin{tabular}{lrrrr}
 \toprule
@@ -118,7 +118,7 @@ Within the simulator, territory is easy to read off the latent and hard to read 
 
 \begin{table}[tb]
 \centering\small
-\caption{In-domain territory decoding on \medalcare\ (P2 pipeline; $n=6{,}513$; run-disjoint five-fold CV; GCV $\alpha$). The constant-predictor floor for \circR\ on the continuous angle is \Rfloormedal. The frontal axis carries essentially no territory information in the simulated cohort: its \circR\ is below the constant floor and its \etasq\ is 0.002.}
+\caption{In-domain territory decoding on \medalcare\ (P2; $n=6{,}513$; run-disjoint five-fold CV). The constant-predictor floor for \circR\ on the continuous angle is \Rfloormedal.}
 \label{tab:indomain}
 \begin{tabular}{lrrrr}
 \toprule
@@ -149,7 +149,7 @@ Scored with the MedalCare-only encoder and all ten folds ($n=4{,}324$), the rule
 
 \begin{table}[tb]
 \centering\small
-\caption{The pre-registered rule scored (P1; the MedalCare-only encoder; all folds, $n=4{,}324$; latent arm). Every label-shuffle permutation $p$ in this table sits at its $10^{-4}$ floor for both arms on both endpoints, so passing it carries no information and the bar's $p<0.01$ clause is met trivially by every arm; only the paired arm-versus-arm tests of Table~\ref{tab:grid12} order arms.}
+\caption{The pre-registered rule scored (P1; the MedalCare-only encoder; all folds, $n=4{,}324$; latent arm). Every label-shuffle $p$ sits at its $10^{-4}$ floor for both arms on both endpoints, so the rule's $p<0.01$ clause is met trivially; only the paired tests of Table~\ref{tab:grid12} order arms.}
 \label{tab:track3}
 \begin{tabular}{lrrrP{3.4cm}}
 \toprule
@@ -203,7 +203,7 @@ The P2 pipeline reads territory as an angle, and its natural score, the circular
 
 \begin{table}[tb]
 \centering\small
-\caption{The $\alpha$ sweep of the transported latent readout (P2; the MedalCare-only encoder; rescaled transport; $n=4{,}324$; patient-block bootstrap on $\Delta$floor $= \circR - \Rfloorptb$). ``order'' = the four predicted territory means preserve the anatomical cyclic order. Raising $\alpha$ buys \circR\ by collapsing the predictor toward a constant; the last row is numerically constant and still clears the empirical floor. Full grid in Appendix~\ref{app:supp}.}
+\caption{The $\alpha$ sweep of the transported latent readout (P2; the MedalCare-only encoder; rescaled transport; $n=4{,}324$). $\Delta$floor $= \circR - \Rfloorptb$, patient-block bootstrap; ``order'' = the four predicted territory means preserve the anatomical cyclic order. The full grid is in Appendix~\ref{app:supp}.}
 \label{tab:alpha}
 \begin{tabular}{rrrrcl}
 \toprule
@@ -237,7 +237,7 @@ The audit of \S\ref{sec:audit-method} asks a question that needs no encoder: for
 \begin{figure}[tb]
 \centering
 \includegraphics[width=\textwidth]{figures/fig1_eta2_scatter.pdf}
-\caption{Per-feature informativeness fidelity. Territory \etasq\ of each feature in \medalcare\ ($n=6{,}547$ MI rows; run-block bootstrap) against the same feature's \etasq\ in \ptbxl\ ($n=4{,}324$; patient-block bootstrap), on square-root axes; whiskers are 95\,\% intervals. The frontal QRS axis (circular \etasq) is the starred point. Features above the diagonal carry more territory information in reality than the simulator gives them; features below carry less. The full 54-row table is Appendix~\ref{app:audit-table}.}
+\caption{Per-feature informativeness fidelity. Territory \etasq\ of each feature in \medalcare\ ($n=6{,}547$ MI rows) against the same feature's \etasq\ in \ptbxl\ ($n=4{,}324$), on square-root axes; whiskers are 95\,\% block-bootstrap intervals. The frontal QRS axis is the starred point. Features above the diagonal carry more territory information in reality than the simulator gives them; features below carry less. The full 54-row table is Appendix~\ref{app:audit-table}.}
 \label{fig:audit}
 \end{figure}
 
@@ -272,7 +272,7 @@ Fourteen columns show the opposite defect, informative in the simulator and flat
 
 \begin{table}[tb]
 \centering\small
-\caption{The largest confirmed blind spots (real-informative, simulator-flat) and spurious channels (simulator-informative, real-flat), ranked by the sim--real \etasq\ difference; 95\,\% block-bootstrap intervals on the difference. In total 28 features plus the axis qualify as blind spots and 14 columns (13 distinct) as spurious; the full table is Appendix~\ref{app:audit-table}. The axis row uses circular \etasq.}
+\caption{The largest confirmed blind spots and spurious channels, ranked by the sim--real \etasq\ difference, with 95\,\% block-bootstrap intervals. In total 28 features plus the axis qualify as blind spots and 14 columns (13 distinct) as spurious; the full table is Appendix~\ref{app:audit-table}. The axis row uses circular \etasq.}
 \label{tab:blindspur}
 \begin{tabular}{lrrrl}
 \toprule
@@ -324,7 +324,7 @@ If the audit's map is right, it should say in advance which parts of the ECG sur
 \begin{figure}[tb]
 \centering
 \includegraphics[width=\textwidth]{figures/fig2_block_transfer.pdf}
-\caption{Per-block territory readouts fitted on \medalcare\ and transported to \ptbxl, under strict transport (left) and rescaled transport (right; diagonal CORAL). Dashed lines are the constant-predictor macro-F$_1$ floors of the two cohorts. Efficiency is the fraction of above-floor in-domain performance that survives transport. The intervals block rides on ${\sim}33\,\%$ imputation cross-domain and its rescaled-transport efficiency is not treated as meaningful.}
+\caption{Per-block territory readouts fitted on \medalcare\ and transported to \ptbxl, under strict transport (left) and rescaled transport (right; diagonal CORAL). Dashed lines are the constant-predictor macro-F$_1$ floors of the two cohorts. Efficiency is the fraction of above-floor in-domain performance that survives transport. The intervals block rides on ${\sim}33\,\%$ imputation cross-domain; its rescaled-transport efficiency is not interpreted.}
 \label{fig:blocks}
 \end{figure}
 
@@ -372,13 +372,13 @@ If the simulator's territory signal lives in the wrong channels, an obvious repa
 \begin{figure}[tb]
 \centering
 \includegraphics[width=\textwidth]{figures/fig3_repair_forest.pdf}
-\caption{Repair arms against the unrestricted 1024-dimensional readout, cross-domain ($n=4{,}324$): paired $\Delta$ macro-F$_1$ with 95\,\% group-bootstrap intervals, filled markers under rescaled transport, hollow under strict transport; grey bands are the norm-matched random-projection null under rescaled transport. Restriction arms are compared with the unrestricted readout, reweighting arms with the unweighted one. No arm improves on its baseline.}
+\caption{Repair arms cross-domain ($n=4{,}324$). Paired $\Delta$ macro-F$_1$ with 95\,\% group-bootstrap intervals; filled markers rescaled transport, hollow strict transport; grey bands are the norm-matched random-projection null under rescaled transport. Restriction arms are compared with the unrestricted 1024-dimensional readout, reweighting arms with the unweighted one. No arm improves on its baseline.}
 \label{fig:repair}
 \end{figure}
 
 \begin{table}[tb]
 \centering\small
-\caption{Repair arms cross-domain ($n=4{,}324$; clean encoder). $\Delta$ is the paired group-bootstrap difference against the unrestricted 1024-dimensional readout (restriction arms) or the unweighted readout (reweighting arms); the random-projection $p$ is against 200 norm-matched Gaussian replacements of the learned coefficients under rescaled transport. The shuffled-label null passes for every arm at $p=0.005$ and certifies only that the readouts use the simulated angle.}
+\caption{Repair arms cross-domain ($n=4{,}324$; the MedalCare-only encoder). $\Delta$ is the paired group-bootstrap difference against the unrestricted 1024-dimensional readout for restriction arms, and against the unweighted readout for reweighting arms. The random-projection $p$ is against 200 norm-matched Gaussian replacements of the learned coefficients under rescaled transport. The shuffled-label null passes for every arm at $p=0.005$ and certifies only that the readouts use the simulated angle.}
 \label{tab:f3}
 \begin{tabular}{P{3.5cm}rrP{3.9cm}P{2.2cm}r}
 \toprule
