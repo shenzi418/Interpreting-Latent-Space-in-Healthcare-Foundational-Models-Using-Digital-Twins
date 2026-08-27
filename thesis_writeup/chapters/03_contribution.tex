@@ -275,20 +275,19 @@ Three diagnostics measure the distance between the two latent distributions. The
 \centering\small
 \caption{The three analysis pipelines. Macro-F$_1$ values from different pipelines are never compared with each other in this thesis; every quoted value names its pipeline.}
 \label{tab:pipelines}
-\begin{tabular}{P{1.6cm}P{3.6cm}P{3.6cm}P{4.4cm}}
+\begin{tabular}{P{2.4cm}P{3.4cm}P{3.5cm}P{3.9cm}}
 \toprule
  & P1 classifier & P2 circular geometry & P3 fidelity audit \\
 \midrule
-estimator & multinomial logistic regression, $C$ by 5-fold CV on source & ridge to $(\cos\phi,\sin\phi)$, GCV $\alpha$; nearest-anchor labels & per-feature ANOVA $\etasq$ (circular $\etasq$ for the axis); P2 readouts per block; latent$\to$feature map \\
-in-domain rows & MedalCare MI test split, $n=1{,}200$ & MedalCare MI train+test, $n=6{,}547$, run-disjoint 5-fold & same as P2 \\
-cross-domain rows & PTB-XL fold 10 ($n=438$) or all folds ($n=4{,}324$) & PTB-XL all folds, $n=4{,}324$ & same as P2 \\
+estimator & logistic regression on the four classes & ridge to $(\cos\phi,\sin\phi)$, nearest-anchor labels & per-feature $\etasq$; per-block P2 readouts; latent-to-feature map \\
+in-domain rows & MedalCare MI test, $n=1{,}200$ & MedalCare MI train + test, $n=6{,}547$ & as P2 \\
+cross-domain rows & PTB-XL fold 10 ($n=438$) or all folds ($n=4{,}324$) & PTB-XL all folds, $n=4{,}324$ & as P2 \\
 scaler modes & evaluation-set; pool & strict transport; rescaled transport & as P2 \\
-uncertainty & 1,000-row bootstrap; label-shuffle $p$ (floor $10^{-4}$); paired swap & 500 label permutations; block bootstrap; group-swap paired tests & 500-draw block bootstrap; block-aware permutation; 200-draw nulls \\
-scripts (under \texttt{analysis/}) & \texttt{phase\_b2\_infarct\_}\newline\texttt{decoding.py} & \texttt{geom\_common.py}\newline\texttt{circular\_geometry.py}\newline\texttt{floor\_audit.py} & \texttt{fidelity\_audit.py}\newline\texttt{block\_transfer.py}\newline\texttt{channel\_repair.py} \\
+uncertainty & row bootstrap; paired swap tests & block bootstrap; label permutations; group-swap tests & block bootstrap; block-aware permutation \\
 \bottomrule
 \end{tabular}
 \end{table}
-\tracenote{Table 3.6: A§5.1-5.2; verified 08-13 provenance headers in the three P3 scripts}
+\tracenote{Table 3.6: A§5.1-5.2; scripts: phase_b2_infarct_decoding.py / geom_common+circular_geometry+floor_audit.py / fidelity_audit+block_transfer+channel_repair.py; verified 08-13 provenance headers in the three P3 scripts}
 
 \section{The informativeness-fidelity audit}
 \label{sec:audit-method}
