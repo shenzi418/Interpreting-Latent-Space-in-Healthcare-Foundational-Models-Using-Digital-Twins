@@ -61,12 +61,12 @@ for y, r in zip(ys, rows):
     ptxt = "p<0.001" if r["p"] < 0.001 else f"p={r['p']:.2f}"
     import matplotlib.transforms as mtransforms
     tr = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
-    ax.text(0.985, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=8.5, va="center", ha="right",
-            color="#333", transform=tr, zorder=4)
+    ax.text(1.03, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=8.5, va="center", ha="left",
+            color="#333", transform=tr, zorder=4, clip_on=False)
 ax.axvline(0, color="#444", lw=1, zorder=1)
 ax.axhline(1.5, color="#ccc", lw=0.8, ls=":")
 ax.set_yticks(ys); ax.set_yticklabels([r["label"] for r in rows], fontsize=9.5)
-ax.set_xlim(-0.165, 0.115)
+ax.set_xlim(-0.17, 0.045)
 ax.tick_params(axis="x", labelsize=9.5)
 ax.set_xlabel("paired Δ macro-F$_1$, cross-domain PTB-XL (n = 4,324)", fontsize=9.5)
 for s in ("top", "right"):
