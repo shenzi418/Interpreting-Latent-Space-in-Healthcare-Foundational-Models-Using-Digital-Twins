@@ -14,7 +14,7 @@
 \node[data] (mc) at (3.6,10.2) {\textbf{MedalCare-XL} (synthetic)\\\scriptsize 16,839 ECGs; MI subset 7,797\\\scriptsize $\thetavec = (\phiang, z, \mathrm{size}, \rho)$; territory$_{4c}$ from $\phiang$};
 \node[data] (px) at (11.4,10.2) {\textbf{PTB-XL} (real)\\\scriptsize 21,799 ECGs; territory$_{4c}$ 4,324\\\scriptsize SCP codes $\to$ territory$_{4c}$; acuity staging};
 % ---- row 2: loader
-\node[box, text width=88mm] (load) at (7.5,7.8) {\textbf{validated loading pipeline} (\S3.2.3)\\\scriptsize \texttt{sig\_name} re-indexing $\cdot$ per-lead z-score $\cdot$ limb-lead identity checks $\cdot$ 3-class filter};
+\node[box, text width=88mm] (load) at (7.5,7.8) {\textbf{loading pipeline} (\S3.2.3)\\\scriptsize \texttt{sig\_name} re-indexing $\cdot$ per-lead z-score $\cdot$ 3-class filter};
 % ---- row 3: two representations
 \node[rep] (z) at (3.9,5.3) {\textbf{latent} $\mathbf z \in \mathbb R^{1024}$\\\scriptsize ECGFounder: frozen backbone + adapters};
 \node[rep] (f) at (11.1,5.3) {\textbf{54 features + frontal QRS axis}\\\scriptsize NeuroKit2 on raw voltages, lead-II fiducials};
