@@ -183,33 +183,38 @@ For each run and domain the pooled features are exported once, in the determinis
 \label{sec:programme}
 % v0 DRAFT 18 Aug — for review. Sources: dossier B (definitions §2), dossier C (fact cards). Owner ruling 18 Aug: no dated timeline in the thesis — phases in logical order, no months.
 
-Table~\ref{tab:programme} lists the phases of the project in the order in which each question arose, and where each outcome is reported. The methods behind every phase are specified in the sections of this chapter. One caveat belongs here: a multi-seed replication of the fine-tuning runs was not carried out, so the uncertainty in Chapter~\ref{ch:results} comes from patient- or run-block bootstrap and from paired resampling. \tracenote{dossier B §5.1 (multi-seed)}
+Table~\ref{tab:programme} lists the phases of the project in the order in which each question arose. The methods behind every phase are specified in the sections of this chapter. One caveat belongs here: a multi-seed replication of the fine-tuning runs was not carried out, so the uncertainty in Chapter~\ref{ch:results} comes from patient- or run-block bootstrap and from paired resampling. \tracenote{dossier B §5.1 (multi-seed)}
 
 \begin{table}[tb]
 \centering\small
-\caption{The experimental programme, in the order the questions arose. One row per phase; the methods behind each phase are specified in this chapter, and the outcomes are reported in the sections named. The repository organises these phases under internal names (Exp~1--8, Track~1--3, Phase~B2, Tiers~1--2), which appear only in Appendix~\ref{app:supp}.}
+\caption{The experimental programme, in the order the questions arose.}
 \label{tab:programme}
-\begin{tabular}{P{3.4cm}P{7.9cm}P{2.4cm}}
+\begin{tabular}{P{4.2cm}P{8.6cm}}
 \toprule
-phase & the question it asked & reported in \\
+phase & question addressed \\
 \midrule
-\multicolumn{3}{l}{\emph{building and adapting the encoders}}\\[1pt]
-frozen-backbone baselines & Does a small trained head on the frozen backbone recover what zero-shot use cannot? & App.~\ref{app:prefix} \\
-joint training: dual vs shared head & Does one shared three-class head move the two domains together where separate heads do not? & \S\ref{sec:res-adapt}; App.~\ref{app:prefix} \\
+\multicolumn{2}{l}{\emph{building and adapting the encoders}}\\[1pt]
+frozen-backbone baselines & Can a small trained head recover what zero-shot use cannot? \\
+\addlinespace[2pt]
+dual- vs shared-head training & Does a shared head bring the two domains closer than separate heads? \\
 \midrule
-\multicolumn{3}{l}{\emph{interrogating the latent}}\\[1pt]
-alignment attempts & Can the two latent distributions be brought together, by training-time penalties, post-hoc projection or reduced dimensionality? & \S\ref{sec:res-align} \\
-territory and $\thetavec$ decoding & Can the twin's infarct parameters be read off the latent, within the twin and across the gap? & \S\ref{sec:res-decode} \\
-pre-registered transfer rule & What would count as successful territory transfer, fixed before any cross-domain number existed? & \S\ref{sec:track3} \\
+\multicolumn{2}{l}{\emph{interrogating the latent}}\\[1pt]
+alignment attempts & Can the two latent distributions be brought together? \\
+\addlinespace[2pt]
+territory and $\thetavec$ decoding & Can the twin's infarct parameters be read from the latent, within the twin and across the gap? \\
+\addlinespace[2pt]
+pre-registered transfer rule & What would count as successful transfer, fixed before any cross-domain number existed? \\
 \midrule
-\multicolumn{3}{l}{\emph{the audit programme}}\\[1pt]
-pipeline validation and re-training & Do the loaders pass physical checks, and what changes when they do? & \S\ref{sec:preproc}; \S\ref{sec:res-adapt} \\
-fair control and detector diagnostics & Does the latent beat 54 clinical features across the gap, and do the standard detectors even see corruption? & \S\ref{sec:res-align}; \S\ref{sec:grid12} \\
-fidelity audit, prediction, repair & Where does each domain write its territory information; does that predict transfer; can anything downstream substitute for it? & \S\ref{sec:res-audit}--\ref{sec:res-repair} \\
+\multicolumn{2}{l}{\emph{the audit programme}}\\[1pt]
+pipeline validation and re-training & Do the loaders pass the physical checks? \\
+\addlinespace[2pt]
+control and detector diagnostics & Does the latent beat the clinical control across the gap? Do the standard detectors see corruption? \\
+\addlinespace[2pt]
+fidelity audit, prediction, repair & Where does each domain write its territory information? Does that predict transfer? Can anything downstream substitute for it? \\
 \bottomrule
 \end{tabular}
 \end{table}
-\tracenote{Table 3.4 redesign per owner Option A ruling; phase content unchanged, sources dossiers B/C}
+\tracenote{Table 3.4 two-column redesign per owner 2026-08-27; questions compressed, phase content unchanged; sources dossiers B/C}
 
 \section[Features and the control arm]{Hand-crafted ECG features and the control arm}
 \label{sec:features}
