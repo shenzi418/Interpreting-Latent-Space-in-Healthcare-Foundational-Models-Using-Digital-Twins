@@ -26,8 +26,8 @@ ARMS = [("Q$_{amp}$ + R$_{amp}$ leads (24-d)", "QR24", "QR24", 24),
         ("R$_{amp}$ leads (12-d)", "R12", "R12", 12),
         ("ST$_{J60}$ leads (12-d)", "ST12", "ST12", 12),
         ("inferior leads II, III, aVF (12-d)", "inferior", "inferior", 12)]
-RW = [("reweight, axis-pair (ESS 1120/6513)", "axpair"),
-      ("reweight, six-global (ESS 208/4968)", "six")]
+RW = [("reweight, axis-pair", "axpair"),
+      ("reweight, six-global", "six")]
 
 rows = []
 for lab, key, nk, dims in ARMS:
@@ -66,7 +66,7 @@ for y, r in zip(ys, rows):
 ax.axvline(0, color="#444", lw=1, zorder=1)
 ax.axhline(1.5, color="#ccc", lw=0.8, ls=":")
 ax.set_yticks(ys); ax.set_yticklabels([r["label"] for r in rows], fontsize=9.5)
-ax.set_xlim(-0.165, 0.145)
+ax.set_xlim(-0.165, 0.115)
 ax.tick_params(axis="x", labelsize=9.5)
 ax.set_xlabel("paired Δ macro-F$_1$, cross-domain PTB-XL (n = 4,324)", fontsize=9.5)
 for s in ("top", "right"):
