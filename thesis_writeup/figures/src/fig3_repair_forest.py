@@ -26,8 +26,8 @@ ARMS = [("Q$_{amp}$ + R$_{amp}$ leads (24-d)", "QR24", "QR24", 24),
         ("R$_{amp}$ leads (12-d)", "R12", "R12", 12),
         ("ST$_{J60}$ leads (12-d)", "ST12", "ST12", 12),
         ("inferior leads II, III, aVF (12-d)", "inferior", "inferior", 12)]
-RW = [("reweight → PTB-XL, axis-pair summary (ESS 1120/6513)", "axpair"),
-      ("reweight → PTB-XL, six-feature summary (ESS 208/4968)", "six")]
+RW = [("reweight, axis-pair (ESS 1120/6513)", "axpair"),
+      ("reweight, six-global (ESS 208/4968)", "six")]
 
 rows = []
 for lab, key, nk, dims in ARMS:
@@ -59,11 +59,14 @@ for y, r in zip(ys, rows):
     ax.plot([r["lo"], r["hi"]], [y - 0.10, y - 0.10], color=col, lw=1.8, zorder=2)
     ax.scatter([r["dt"]], [y - 0.10], s=46, facecolor=col, edgecolor="white", linewidth=0.8, zorder=3)
     ptxt = "p<0.001" if r["p"] < 0.001 else f"p={r['p']:.2f}"
-    ax.text(0.058, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=7.4, va="center", ha="left", color="#333")
+    import matplotlib.transforms as mtransforms
+    tr = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+    ax.text(0.985, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=7.4, va="center", ha="right",
+            color="#333", transform=tr, zorder=4)
 ax.axvline(0, color="#444", lw=1, zorder=1)
 ax.axhline(1.5, color="#ccc", lw=0.8, ls=":")
 ax.set_yticks(ys); ax.set_yticklabels([r["label"] for r in rows], fontsize=8)
-ax.set_xlim(-0.165, 0.125)
+ax.set_xlim(-0.165, 0.145)
 ax.set_xlabel("paired Δ macro-F$_1$, cross-domain PTB-XL (n=4324), 1000 patient-block bootstrap draws", fontsize=8)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
@@ -71,14 +74,14 @@ ax.grid(True, axis="x", color="#ececea", lw=0.6); ax.set_axisbelow(True)
 # legend
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-h = [Line2D([0], [0], marker="o", color="#2a78d6", lw=1.8, markersize=6, label="target scaler, 95% CI"),
-     Line2D([0], [0], marker="o", color="#8a8a84", markerfacecolor="white", lw=1.0, markersize=6, label="strict/source scaler"),
-     Patch(facecolor="#e4e4e0", label="random-projection null (mean…95th pct, target)")]
+h = [Line2D([0], [0], marker="o", color="#2a78d6", lw=1.8, markersize=6, label="rescaled transport, 95% CI"),
+     Line2D([0], [0], marker="o", color="#8a8a84", markerfacecolor="white", lw=1.0, markersize=6, label="strict transport"),
+     Patch(facecolor="#e4e4e0", label="random-projection null (mean–95th pct, rescaled)")]
 fig.legend(handles=h, loc="lower center", ncol=3, fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, 0.0))
-ax.set_title(f"Repair arms vs the unrestricted 1024-d readout (macro-F$_1$ {base_t:.4f} target / {base_s:.4f} source)", fontsize=9, loc="left")
+ax.set_title("Repair arms against the unrestricted 1024-dimensional readout", fontsize=9, loc="left")
 fig.tight_layout(rect=(0, 0.06, 1, 1))
-fig.savefig(os.path.join(OUT, "fig3_repair_forest.pdf"))
-fig.savefig(os.path.join(OUT, "fig3_repair_forest.png"), dpi=150)
+fig.savefig(os.path.join(OUT, "fig3_repair_forest.pdf"), bbox_inches="tight", pad_inches=0.03)
+fig.savefig(os.path.join(OUT, "fig3_repair_forest.png"), dpi=150, bbox_inches="tight", pad_inches=0.03)
 with open(os.path.join(OUT, "fig3_points.csv"), "w", newline="", encoding="utf-8") as fh:
     w = csv.writer(fh)
     w.writerow(["arm", "kind", "delta_target", "ci_lo", "ci_hi", "p_boot", "delta_source", "ci_lo_s", "ci_hi_s", "p_boot_s", "obs_macro_f1_target", "null_band_target"])
