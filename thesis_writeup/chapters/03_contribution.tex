@@ -146,7 +146,7 @@ All encoders in this thesis are the same pre-trained network, \ecgfounder~\citep
 The backbone is frozen in every run. Adaptation happens through two small trainable components. \emph{Residual adapters} are inserted at each stage: a $1\times1$ convolution down to $\max(8, C/16)$ channels, ReLU, and a $1\times1$ convolution back up, added residually. The up-projection is zero-initialised, so each adapter starts as an exact identity. \emph{Heads} are linear layers on the pooled feature. In the bottleneck experiments the head is instead two layers, $\mathrm{Linear}(1024,K)\to\mathrm{GELU}\to\mathrm{Linear}(K,3)$, and the pre-GELU $K$-dimensional projection is the exported latent. In the shared-head runs the trainable parameter count is exactly 312{,}643 (adapters 309{,}568, head 3{,}075). \tracenote{A§2.1; net1d.py:98-115; scripts/finetune_bottleneck.py:77-94; outputs/_log_exp8_medalonly.txt:13} Optimisation is Adam with the head at $10^{-3}$ and the adapters at $10^{-5}$, class-balanced binary cross-entropy with \texttt{pos\_weight} taken from the post-filter class balance, label smoothing 0.05, gradient clipping at 1.0, weight decay $10^{-5}$, batch size 128, a plateau learning-rate scheduler and early stopping. The checkpoint with the best validation score is kept. These are standard values, fixed in advance rather than searched: the trainable budget is small, every compared arm trains under the identical recipe, and checkpoint selection on validation absorbs most of the remaining sensitivity. \tracenote{A§2.1, A§2.3.1 shared args.json fields}
 
 \subsection{Fine-tuning modes}
-Three training regimes were used; Table~\ref{tab:runs} maps them to the repository's runs.
+Three training regimes were used over the project. Table~\ref{tab:runs} lists the validated runs; the earlier families appear with their results in Appendix~\ref{app:prefix}.
 \begin{itemize}[nosep]
 \item \emph{Single-domain}: adapters and a head on one dataset in its native label space, five superclasses for PTB-XL or eight classes for MedalCare.
 \item \emph{Joint dual-head}: both datasets in alternating batches through the shared backbone and adapters, with a separate head per domain in its native label space, optionally with an MMD alignment loss between the two domains' pooled features. \tracenote{A§2.2; net1d.py:429-511}
@@ -156,31 +156,22 @@ The bottleneck heads ($K\in\{16,64,256\}$) are trained on top of a frozen shared
 
 \begin{table}[tb]
 \centering\small
-\caption{The fine-tuning runs, grouped by family: configuration only. Test metrics for the validated family are in Table~\ref{tab:exp8}; the earlier families' results are superseded and appear only in Appendix~\ref{app:prefix}. Hyper-parameters of the earlier families were not written to disk (\texttt{args.json} did not yet exist) and are given from the run conventions. Every analysis in Chapter~\ref{ch:results} uses the validated family. The text refers to runs by descriptive names (shared-head, dual-head, MedalCare-only, \dots); the repository identifiers in this table are the reproducibility mapping.}
+\caption{The validated encoder family, by the names used throughout the text. Test metrics are in Table~\ref{tab:exp8}; the mapping from these names to repository run identifiers, for all families, is in Appendix~\ref{app:repro}.}
 \label{tab:runs}
-\begin{tabular}{P{3.9cm}P{3.6cm}P{1.5cm}P{2.1cm}P{2.3cm}}
+\begin{tabular}{P{3.6cm}P{6.2cm}P{2.6cm}}
 \toprule
-family (run ids) & training mode & labels & alignment / $K$ & trained on \\
+name in the text & configuration & trained on \\
 \midrule
-\multicolumn{5}{l}{\emph{earlier pipeline (results in Appendix~\ref{app:prefix} only)}}\\[1pt]
-\texttt{ptbxl\_baseline} & single, adapters + linear head & PTB 5 & --- & PTB-XL \\
-\texttt{joint\_baseline}; \texttt{\_adapter\_cls}; \texttt{\_adapter\_mmd} & joint dual-head (+ physics head) & 8 + 5 & --- ; --- ; MMD & both \\
-\texttt{exp5\_3class}; \texttt{exp6\_3class} & joint dual-head & 3 + 3 & --- ; ccMMD 0.1 & both \\
-\texttt{exp7\_baseline}; \texttt{exp7\_ccmmd} & joint shared-head & 3 & --- ; ccMMD 0.1 & both \\
-\texttt{exp7\_bottleneck\_}\newline\texttt{K16/K64/K256} & bottleneck head on \texttt{exp7\_baseline} & 3 & $K$ = 16 / 64 / 256 & both \\
-\texttt{exp7\_tier2\_K64\_A}; \texttt{\_B} & multitask bottleneck ($\lambda_{\mathrm{cls}},\lambda_{\mathrm{bio}}$ = 0.5, 0.5; 0, 1) & 3 + bio & $K$ = 64 & both \\
-\midrule
-\multicolumn{5}{l}{\emph{validated pipeline (the \texttt{exp8\_leadfix} family; used throughout Chapter~\ref{ch:results})}}\\[1pt]
-\texttt{\dots baseline} & joint shared-head & 3 & --- & both \\
-\texttt{\dots ccmmd} & joint shared-head & 3 & ccMMD 0.1 & both \\
-\texttt{\dots dual} & joint dual-head, shared labels & 3 + 3 & --- & both \\
-\texttt{\dots globalz} & shared-head, global-scalar z-score & 3 & --- & both \\
-\texttt{\dots K64} & bottleneck head on \texttt{\dots baseline} & 3 & $K$ = 64 & both \\
-\textbf{\texttt{\dots medalonly}} & shared-head, MedalCare-only & 3 & --- & \textbf{MedalCare only} \\
+shared-head & joint shared head, three classes & both \\
+shared-head + ccMMD & shared head with class-conditional MMD, $\lambda=0.1$ & both \\
+dual-head & joint dual head, shared labels & both \\
+global-z ablation & shared head, global-scalar z-score & both \\
+bottleneck K64 & $K=64$ head on the shared-head run & both \\
+\textbf{MedalCare-only} & shared head, no PTB-XL gradient step & \textbf{MedalCare only} \\
 \bottomrule
 \end{tabular}
 \end{table}
-\tracenote{Table 3.3: A§2.3.1 (config) and A§2.3.2 (best.test.{medalcare,ptbxl}.f1 per run); tier2_B classification is below chance by construction (lambda_cls=0) so shown as ---; ‡ = passive readout, never trained on PTB-XL}
+\tracenote{Table 3.3: A§2.3.1 (config); full name-to-id mapping in Appendix tab:runmap}
 
 \subsection{Which encoder carries the results}
 The headline encoder for every cross-domain result is the MedalCare-only encoder (repository id \texttt{exp8\_leadfix\_medalonly}; Table~\ref{tab:runs}). It never took a PTB-XL gradient step and its checkpoint was chosen on MedalCare validation alone, so all ten PTB-XL folds are legitimate evaluation data ($n=4{,}324$ territory-labelled records, \S\ref{sec:data-ptbxl}); its PTB-XL classification score (0.457, Table~\ref{tab:exp8}) is a passive read-out and is reported only for completeness. Encoders that saw folds 1--9 in training (the dual-head encoder and its siblings) can be evaluated on fold~10 only ($n=438$); the dual-head encoder is the sensitivity arm. Because all encoders share one backbone, one adapter design and one seed, they are not independent replicates: the encoders are never counted as replicates, and where several are reported the effective number of independent observations is closer to two. \tracenote{A§1.2.5, A§2.3; CLAUDE.md active-state (medalonly, ~2 effective observations); decision doc §4 item 3}
@@ -196,7 +187,7 @@ Table~\ref{tab:programme} lists the phases of the project in the order in which 
 
 \begin{table}[tb]
 \centering\small
-\caption{The experimental programme, in the order the questions arose. One row per phase; the methods behind each phase are specified in this chapter, and the outcomes are reported in the sections named. The repository organises these phases under internal names (Exp~1--8, Track~1--3, Phase~B2, Tiers~1--2), which appear only in Table~\ref{tab:runs} and Appendix~\ref{app:prefix}.}
+\caption{The experimental programme, in the order the questions arose. One row per phase; the methods behind each phase are specified in this chapter, and the outcomes are reported in the sections named. The repository organises these phases under internal names (Exp~1--8, Track~1--3, Phase~B2, Tiers~1--2), which appear only in Appendix~\ref{app:supp}.}
 \label{tab:programme}
 \begin{tabular}{P{3.4cm}P{7.9cm}P{2.4cm}}
 \toprule

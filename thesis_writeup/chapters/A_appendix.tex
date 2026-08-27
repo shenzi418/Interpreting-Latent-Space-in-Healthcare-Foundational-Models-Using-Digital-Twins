@@ -57,4 +57,34 @@ The P1 scaler modes, from the analysis code's own documentation. \texttt{source}
 \section{Reproducibility}
 \label{app:repro}
 
+Table~\ref{tab:runmap} maps every descriptive run name used in the text to its repository identifier.
+
+\begin{table}[h]
+\centering\small
+\caption{Run-name mapping: every fine-tuning run, its repository identifier and configuration. The validated family carries every Chapter~\ref{ch:results} result (Table~\ref{tab:runs}); the earlier families' results are in \S\ref{app:prefix}, and their hyper-parameters, never written to disk, are given from the run conventions.}
+\label{tab:runmap}
+\begin{tabular}{P{3.4cm}P{5.0cm}P{4.6cm}}
+\toprule
+name in the text & repository id(s) & configuration \\
+\midrule
+\multicolumn{3}{l}{\emph{earlier families (results in \S\ref{app:prefix} only)}}\\[1pt]
+PTB-XL single-domain & \texttt{ptbxl\_baseline} & single-domain, PTB 5 labels \\
+dual-head, native labels & \texttt{joint\_baseline}; \texttt{\_adapter\_cls}; \texttt{\_adapter\_mmd} & joint dual-head, 8 + 5 labels; MMD variant \\
+dual-head, three-class & \texttt{exp5\_3class}; \texttt{exp6\_3class} & joint dual-head, 3 + 3; ccMMD 0.1 \\
+shared-head & \texttt{exp7\_baseline}; \texttt{exp7\_ccmmd} & joint shared-head, 3; ccMMD 0.1 \\
+bottlenecks & \texttt{exp7\_bottleneck\_}\newline\texttt{K16/K64/K256} & bottleneck head on \texttt{exp7\_baseline} \\
+multitask bottleneck & \texttt{exp7\_tier2\_K64\_A}; \texttt{\_B} & $\lambda_{\mathrm{cls}},\lambda_{\mathrm{bio}}$ = 0.5, 0.5; 0, 1; $K=64$ \\
+\midrule
+\multicolumn{3}{l}{\emph{validated family (results throughout Chapter~\ref{ch:results})}}\\[1pt]
+shared-head & \texttt{exp8\_leadfix\_baseline} & joint shared-head, three classes \\
+shared-head + ccMMD & \texttt{exp8\_leadfix\_ccmmd} & ccMMD $\lambda=0.1$ \\
+dual-head & \texttt{exp8\_leadfix\_dual} & joint dual-head, shared labels \\
+global-z ablation & \texttt{exp8\_leadfix\_globalz} & shared-head, global-scalar z-score \\
+bottleneck K64 & \texttt{exp8\_leadfix\_K64} & $K=64$ head on the shared-head run \\
+MedalCare-only & \texttt{exp8\_leadfix\_medalonly} & shared-head, trained on MedalCare only \\
+\bottomrule
+\end{tabular}
+\end{table}
+\tracenote{tab:runmap = former Table 3.3 content, both blocks; A§2.3.1}
+
 All code, manifests, $\thetavec$ targets, feature tables and this document's source are in the public repository at the tagged commit \texttt{freeze-2026-08-13}; the earlier pipeline state is preserved at the tag \texttt{pre-leadfix}. Analyses are seeded in their script headers (fine-tuning seed 42 throughout; the audit scripts carry seed 20260813 with 500 bootstrap draws, and the repair script 1{,}000 draws with 200-draw nulls); every random stream in the P1 pipeline is derived from a hash of the cell identity, so any cell's intervals are independent of which other cells are computed. The mapping from each reported number to its artifact is carried in the source of this document as machine-readable trace notes; the central artifacts are the three audit result files (\texttt{f1\_fidelity.json}, \texttt{f2\_blocks.json}, \texttt{f3\_repair.json}, with independently re-implemented verifier counterparts), the floor audit, the paired-grid outputs and the permutation-sweep file. Two recorded gaps: the configuration file named by the fine-tuning runs' saved arguments for the unused physics head (\texttt{config/theta.json}) is not on disk, its content recoverable from a saved metrics file; and hyper-parameters of the runs predating the corrections were never written to disk and are reported from run conventions. Training used one consumer GPU (\S\ref{sec:decl-sustain}); every analysis in Chapters 3--4 runs on CPU from the exported latents and feature tables. \tracenote{A§6, A§7.3, A§7.6; notes/contradiction_register.md items 5, 9; scripts' seed headers}
