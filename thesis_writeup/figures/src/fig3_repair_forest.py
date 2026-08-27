@@ -45,7 +45,7 @@ for lab, key in RW:
                      ds=ps["delta"], slo=ps["ci_lo"], shi=ps["ci_hi"], ps=ps["p_boot"], nb=None,
                      obs_t=r["target"]["score_avgpred"]["macro_f1"]))
 
-fig, ax = plt.subplots(figsize=(9.0, 4.6))
+fig, ax = plt.subplots(figsize=(7.2, 4.4))
 n = len(rows)
 ys = list(range(n))[::-1]
 for y, r in zip(ys, rows):
@@ -61,13 +61,14 @@ for y, r in zip(ys, rows):
     ptxt = "p<0.001" if r["p"] < 0.001 else f"p={r['p']:.2f}"
     import matplotlib.transforms as mtransforms
     tr = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
-    ax.text(0.985, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=7.4, va="center", ha="right",
+    ax.text(0.985, y - 0.10, f"Δ={r['dt']:+.4f}  {ptxt}", fontsize=8.5, va="center", ha="right",
             color="#333", transform=tr, zorder=4)
 ax.axvline(0, color="#444", lw=1, zorder=1)
 ax.axhline(1.5, color="#ccc", lw=0.8, ls=":")
-ax.set_yticks(ys); ax.set_yticklabels([r["label"] for r in rows], fontsize=8)
+ax.set_yticks(ys); ax.set_yticklabels([r["label"] for r in rows], fontsize=9.5)
 ax.set_xlim(-0.165, 0.145)
-ax.set_xlabel("paired Δ macro-F$_1$, cross-domain PTB-XL (n=4324), 1000 patient-block bootstrap draws", fontsize=8)
+ax.tick_params(axis="x", labelsize=9.5)
+ax.set_xlabel("paired Δ macro-F$_1$, cross-domain PTB-XL (n = 4,324)", fontsize=9.5)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
 ax.grid(True, axis="x", color="#ececea", lw=0.6); ax.set_axisbelow(True)
@@ -77,8 +78,8 @@ from matplotlib.patches import Patch
 h = [Line2D([0], [0], marker="o", color="#2a78d6", lw=1.8, markersize=6, label="rescaled transport, 95% CI"),
      Line2D([0], [0], marker="o", color="#8a8a84", markerfacecolor="white", lw=1.0, markersize=6, label="strict transport"),
      Patch(facecolor="#e4e4e0", label="random-projection null (mean–95th pct, rescaled)")]
-fig.legend(handles=h, loc="lower center", ncol=3, fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, 0.0))
-ax.set_title("Repair arms against the unrestricted 1024-dimensional readout", fontsize=9, loc="left")
+fig.legend(handles=h, loc="lower center", ncol=3, fontsize=8.5, frameon=False, bbox_to_anchor=(0.5, 0.0))
+ax.set_title("Repair arms against the unrestricted 1024-dimensional readout", fontsize=10.5, loc="left")
 fig.tight_layout(rect=(0, 0.06, 1, 1))
 fig.savefig(os.path.join(OUT, "fig3_repair_forest.pdf"), bbox_inches="tight", pad_inches=0.03)
 fig.savefig(os.path.join(OUT, "fig3_repair_forest.png"), dpi=150, bbox_inches="tight", pad_inches=0.03)
