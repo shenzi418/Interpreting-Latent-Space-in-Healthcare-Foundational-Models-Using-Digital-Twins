@@ -92,7 +92,7 @@ for f in files:
     txt = load(f)
     for m in srx.finditer(txt):
         s = txt[max(0, m.start() - 150): m.end() + 150].lower()
-        if not any(k in s for k in ("strict", "source", "target", "both scaler", "\\qone", "legacy", "in-domain")):
+        if not any(k in s for k in ("strict", "rescaled", "evaluation-set", "eval-set", "pool scaling", "both scaler", "both mode", "\\qone", "source", "target", "legacy", "in-domain")):
             ln = txt.count("\n", 0, m.start()) + 1
             print(f"  {f}:{ln}: {m.group(0)[:120]}")
 
