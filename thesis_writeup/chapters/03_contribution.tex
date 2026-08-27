@@ -247,7 +247,7 @@ all 54 finite & & & 4,412 (67.4\,\%) & 3,254 (75.3\,\%) \\
 \label{sec:pipelines}
 % v0 DRAFT 18 Aug — for review. Definitions trace to dossier A §5 (code line pointers there).
 
-Three analysis pipelines produce every number in Chapter~\ref{ch:results}. Each number is quoted with its pipeline's name, because the three pipelines score different rows with different estimators and their values cannot be compared with one another. Table~\ref{tab:pipelines} summarises them.
+Three analysis pipelines produce every number in Chapter~\ref{ch:results}. Each number is quoted with its pipeline's name, because the three pipelines score different rows with different estimators and their values cannot be compared with one another. This section specifies the first two, P1 and P2, together with the alignment diagnostics; the third, P3, is the informativeness-fidelity audit of \S\ref{sec:audit-method}. Table~\ref{tab:pipelines} summarises all three.
 
 \subsection{P1: the classifier pipeline}
 \label{sec:p1}
@@ -304,5 +304,3 @@ For each feature block, the four per-lead blocks, the globals, all 54 together, 
 
 \paragraph{Can the transfer be repaired?}
 Three interventions are tested, all fitted on MedalCare with PTB-XL features never used at inference. The first is \emph{channel restriction}. A ridge map from the latent to the 54 features is fitted on all-54-finite MedalCare rows; restricting the map to a block gives a low-dimensional representation on which the P2 readout is refitted, so a restricted readout uses only the latent directions that predict, say, the Q and R amplitudes. The restrictions tested are Q, R, ST and T (12 dimensions each), Q+R (24), the axis pair, and two lead groups, inferior (II, III, aVF) and anterior (V1--V4). Each restricted arm is compared with the unrestricted 1024-dimensional readout by the paired group bootstrap on identical rows and tested against both mandatory nulls. The second is \emph{importance reweighting}. A logistic domain classifier gives each MedalCare row a weight, its odds of being real, clipped at the 99th percentile, and rows are resampled by these weights before refitting. The effective sample size is reported, a uniform resample matched in effective sample size controls for the loss of rows, and the reweighted readout is compared with the unweighted one on the same rows. The third, \emph{recalibration}, is the rescaled-transport mode of P2, already part of every transport table. \tracenote{A§5.2 channel_repair.py:157-253,425-486,508-577; main report C.3; w = p_real/(1-p_real), ESS = 1/sum w^2; inferior 12-d, anterior 16-d; verifier: analysis/channel_repair_verify.py}
-
-Both pre-registered instruments, the decision rule scored in \S\ref{sec:res-decode} and the block-transfer prediction of \S\ref{sec:res-predict}, are quoted verbatim where they are scored.
