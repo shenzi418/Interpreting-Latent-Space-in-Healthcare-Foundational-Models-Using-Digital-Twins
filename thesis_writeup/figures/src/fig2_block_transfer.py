@@ -28,13 +28,13 @@ BLOCKS = [("ST_J60", "ST$_{J60}$ ×12", "#2a78d6", "o"),
           ("full54", "all 54", "#333333", "P"),
           ("axis2", "axis (R$_I$, R$_{aVF}$) fitted", "#8a8a84", "X")]
 
-fig, axes = plt.subplots(1, 2, figsize=(8.6, 4.6), sharey=True)
-for ax, mode, title in [(axes[0], "cross_source", "strict / source scaler (raw transport)"),
-                        (axes[1], "cross_target", "target scaler (after re-centring on the PTB-XL MI cohort)")]:
+fig, axes = plt.subplots(1, 2, figsize=(7.6, 4.8), sharey=True)
+for ax, mode, title in [(axes[0], "cross_source", "strict transport"),
+                        (axes[1], "cross_target", "rescaled transport (re-centred on PTB-XL)")]:
     ax.axhline(FLOOR_X, xmin=0.55, xmax=1.0, color="#9a9a94", lw=1, ls="--", zorder=1)
     ax.axhline(FLOOR_IN, xmin=0.0, xmax=0.45, color="#9a9a94", lw=1, ls="--", zorder=1)
-    ax.text(0.02, FLOOR_IN + 0.004, f"constant floor {FLOOR_IN:.4f}", fontsize=7, color="#6f6f69", ha="left", va="bottom")
-    ax.text(0.56, FLOOR_X - 0.004, f"constant floor {FLOOR_X:.4f}", fontsize=7, color="#6f6f69", ha="left", va="top")
+    ax.text(0.02, FLOOR_IN + 0.004, f"floor {FLOOR_IN:.4f}", fontsize=8, color="#6f6f69", ha="left", va="bottom")
+    ax.text(0.56, FLOOR_X + 0.004, f"floor {FLOOR_X:.4f}", fontsize=8, color="#6f6f69", ha="left", va="bottom")
     items = []
     for key, label, col, mk in BLOCKS:
         pb = d["per_block"][key]
@@ -43,10 +43,10 @@ for ax, mode, title in [(axes[0], "cross_source", "strict / source scaler (raw t
         ax.plot([0, 1], [y0, y1], color=col, lw=1.6, alpha=0.9, zorder=2)
         ax.scatter([0, 1], [y0, y1], color=col, marker=mk, s=42, edgecolor="white", linewidth=0.7, zorder=3, label=label)
         star = "*" if (key == "globals" and mode == "cross_target") else ""
-        items.append((y1, f"{label}   eff {eff:.3f}{star}", col))
+        items.append((y1, f"eff {eff:.3f}{star}", col))
     # de-collide right-hand labels: sort by y, enforce a minimum gap, then draw with short leaders
     items.sort(key=lambda t: -t[0])
-    gap = 0.016
+    gap = 0.022
     ys = [t[0] for t in items]
     for i in range(1, len(ys)):
         if ys[i] > ys[i - 1] - gap:
@@ -56,23 +56,25 @@ for ax, mode, title in [(axes[0], "cross_source", "strict / source scaler (raw t
         if ys[i] < ys[i + 1] + gap:
             ys[i] = ys[i + 1] + gap
     for (y1, txt, col), yy in zip(items, ys):
-        ax.annotate(txt, xy=(1, y1), xytext=(1.06, yy), textcoords="data", fontsize=7.2, va="center", ha="left",
-                    color="#333", annotation_clip=False,
+        ax.annotate(txt, xy=(1, y1), xytext=(1.10, yy), textcoords="data", fontsize=9, va="center", ha="left",
+                    color=col, annotation_clip=False,
                     arrowprops=dict(arrowstyle="-", color="#bbb", lw=0.6, shrinkA=0, shrinkB=2))
-    ax.set_xlim(-0.05, 1.05)
-    ax.set_xticks([0, 1]); ax.set_xticklabels(["in-domain\nMedalCare-XL (CV)", "cross-domain\nPTB-XL (n=4324)"], fontsize=8)
-    ax.set_title(title, fontsize=9, loc="left")
+    ax.set_xlim(-0.06, 1.52)
+    ax.set_xticks([0, 1]); ax.set_xticklabels(["in-domain", "cross-domain"], fontsize=9.5)
+    ax.set_title(title, fontsize=10, loc="left")
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     ax.grid(True, axis="y", color="#ececea", lw=0.6); ax.set_axisbelow(True)
-axes[0].set_ylabel("nearest-anchor macro-F$_1$ (4-class territory)", fontsize=8.5)
+axes[0].set_ylabel("nearest-anchor macro-F$_1$ (4-class territory)", fontsize=9.5)
 axes[0].set_ylim(0.10, 0.48)
-fig.suptitle("Per-block territory readouts fitted on the simulator, transported to real ECG", fontsize=10, x=0.01, ha="left")
-fig.text(0.01, 0.005, "efficiency = (F1$_{cross}$ − floor$_{cross}$) / (F1$_{in}$ − floor$_{in}$).   *intervals block rides on ~33% imputation cross-domain (target-scaler efficiency not headlined).",
-         fontsize=6.8, color="#555")
-fig.tight_layout(rect=(0, 0.03, 0.86, 0.95))
-fig.savefig(os.path.join(OUT, "fig2_block_transfer.pdf"))
-fig.savefig(os.path.join(OUT, "fig2_block_transfer.png"), dpi=150)
+fig.suptitle("Per-block territory readouts fitted on the simulator, transported to real ECG", fontsize=11, x=0.01, ha="left")
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=9, frameon=False, bbox_to_anchor=(0.5, 0.045))
+fig.text(0.01, 0.005, "efficiency = (F1$_{cross}$ − floor$_{cross}$) / (F1$_{in}$ − floor$_{in}$).   *intervals block: ~33% imputation cross-domain; efficiency not interpreted.",
+         fontsize=8, color="#555")
+fig.tight_layout(rect=(0, 0.13, 1, 0.94))
+fig.savefig(os.path.join(OUT, "fig2_block_transfer.pdf"), bbox_inches="tight", pad_inches=0.03)
+fig.savefig(os.path.join(OUT, "fig2_block_transfer.png"), dpi=150, bbox_inches="tight", pad_inches=0.03)
 
 with open(os.path.join(OUT, "fig2_points.csv"), "w", newline="") as fh:
     w = csv.writer(fh)
