@@ -156,18 +156,18 @@ The bottleneck heads ($K\in\{16,64,256\}$) are trained on top of a frozen shared
 
 \begin{table}[tb]
 \centering\small
-\caption{The validated encoder family, by the names used throughout the text. Test metrics are in Table~\ref{tab:exp8}; the mapping from these names to repository run identifiers, for all families, is in Appendix~\ref{app:repro}.}
+\caption{The validated encoder family.}
 \label{tab:runs}
-\begin{tabular}{P{3.6cm}P{6.2cm}P{2.6cm}}
+\begin{tabular}{lll}
 \toprule
-name in the text & configuration & trained on \\
+name & configuration & trained on \\
 \midrule
 shared-head & joint shared head, three classes & both \\
 shared-head + ccMMD & shared head with class-conditional MMD, $\lambda=0.1$ & both \\
 dual-head & joint dual head, shared labels & both \\
 global-z ablation & shared head, global-scalar z-score & both \\
 bottleneck K64 & $K=64$ head on the shared-head run & both \\
-\textbf{MedalCare-only} & shared head, no PTB-XL gradient step & \textbf{MedalCare only} \\
+\textbf{MedalCare-only} & shared head, no PTB-XL gradient step & \textbf{MedalCare} \\
 \bottomrule
 \end{tabular}
 \end{table}
