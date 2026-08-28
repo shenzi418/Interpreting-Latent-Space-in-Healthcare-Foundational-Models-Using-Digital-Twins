@@ -26,9 +26,10 @@ Every number in the thesis traces to a result file. The frozen copies live in `r
 | Constant-predictor floors and anchor angles (§3.6, §4.3) | `results/floor_audit.json` |
 | Table 4.8 and Appendix A.3 (α sweep) | `results/alpha_sweep_grid.txt`, `results/alpha_sweep_supplement.txt` |
 | Floor-free scores and nulls (§4.3) | `results/floor_free_scores.txt` |
-| Tables 4.9–4.10, Figure 4.1 (fidelity audit) | `results/f1_fidelity.json` |
-| Table 4.11, Figure 4.2 (block transfer and prediction) | `results/f2_blocks.json` |
-| Table 4.12, Figure 4.3 (repair experiments) | `results/f3_repair.json` |
+| Figure 4.1 (cross-domain confusion matrices) | `results/confusion_medalcare_only.json` |
+| Tables 4.9–4.10, Figure 4.2 (fidelity audit) | `results/f1_fidelity.json` |
+| Table 4.11, Figure 4.3 (block transfer and prediction) | `results/f2_blocks.json` |
+| Table 4.12, Figure 4.4 (repair experiments) | `results/f3_repair.json` |
 | Independent re-implementation checks | `results/verify/` |
 
 Remaining values (for example the paired latent-versus-control grid of Table 4.7) regenerate from the scripts in `analysis/` and `scripts/`, whose seeds are fixed in their headers.

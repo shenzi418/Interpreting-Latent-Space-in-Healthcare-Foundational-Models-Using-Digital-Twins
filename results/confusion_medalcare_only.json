@@ -1,0 +1,93 @@
+{
+ "description": "Cross-domain 4-class confusion matrices of the transported latent readout (thesis Figure 4.1). Extracted verbatim from the stored run artifacts of the twelve-cell grid; rows = true territory, cols = predicted, label order as listed.",
+ "encoder": "exp8_leadfix_medalonly",
+ "eval_rows": "PTB-XL all folds, n=4324",
+ "modes": {
+  "evaluation_set_scaling": {
+   "code_name": "target",
+   "labels": [
+    "Anteroseptal",
+    "Anterolateral",
+    "Inferior",
+    "Inferolateral"
+   ],
+   "confusion_matrix": [
+    [
+     642,
+     516,
+     410,
+     56
+    ],
+    [
+     154,
+     176,
+     108,
+     17
+    ],
+    [
+     646,
+     231,
+     896,
+     141
+    ],
+    [
+     83,
+     44,
+     142,
+     62
+    ]
+   ],
+   "n_per_class_truth": {
+    "Anteroseptal": 1624,
+    "Anterolateral": 455,
+    "Inferior": 1914,
+    "Inferolateral": 331
+   },
+   "macro_f1": 0.3439992608155322,
+   "source": "outputs/phase_b2_medalonly_allfolds_target/cross_domain_4c_pipelineA.json"
+  },
+  "pool_scaling": {
+   "code_name": "target_pool_measured",
+   "labels": [
+    "Anteroseptal",
+    "Anterolateral",
+    "Inferior",
+    "Inferolateral"
+   ],
+   "confusion_matrix": [
+    [
+     485,
+     631,
+     426,
+     82
+    ],
+    [
+     103,
+     211,
+     112,
+     29
+    ],
+    [
+     469,
+     270,
+     932,
+     243
+    ],
+    [
+     64,
+     52,
+     139,
+     76
+    ]
+   ],
+   "n_per_class_truth": {
+    "Anteroseptal": 1624,
+    "Anterolateral": 455,
+    "Inferior": 1914,
+    "Inferolateral": 331
+   },
+   "macro_f1": 0.33571404949247385,
+   "source": "outputs/phase_b2_medalonly_allfolds_target_pool_measured/cross_domain_4c_pipelineA.json"
+  }
+ }
+}
