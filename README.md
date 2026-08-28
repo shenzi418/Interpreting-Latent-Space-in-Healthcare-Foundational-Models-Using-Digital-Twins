@@ -22,20 +22,20 @@ Every number in the thesis traces to a result file. The frozen copies live in `r
 |---|---|
 | Table 4.1 (encoder classification) | `results/encoder_metrics/*.json` |
 | Table 4.2 (loading configurations, C2ST/MMD/kNN) | `results/c2st_loader_conditions.json` |
-| Table 4.3 (77-cell lead-permutation sweep) | `results/lead_permutation_sweep.json` |
+| Table 4.4 (77-cell lead-permutation sweep) | `results/lead_permutation_sweep.json` |
 | Constant-predictor floors and anchor angles (§3.6, §4.3) | `results/floor_audit.json` |
 | Table 4.8 and Appendix A.3 (α sweep) | `results/alpha_sweep_grid.txt`, `results/alpha_sweep_supplement.txt` |
 | Floor-free scores and nulls (§4.3) | `results/floor_free_scores.txt` |
-| Tables 4.10–4.11, Figure 4.1 (fidelity audit) | `results/f1_fidelity.json` |
-| Table 4.12, Figure 4.2 (block transfer and prediction) | `results/f2_blocks.json` |
-| Table 4.13, Figure 4.3 (repair experiments) | `results/f3_repair.json` |
+| Tables 4.9–4.10, Figure 4.1 (fidelity audit) | `results/f1_fidelity.json` |
+| Table 4.11, Figure 4.2 (block transfer and prediction) | `results/f2_blocks.json` |
+| Table 4.12, Figure 4.3 (repair experiments) | `results/f3_repair.json` |
 | Independent re-implementation checks | `results/verify/` |
 
 Remaining values (for example the paired latent-versus-control grid of Table 4.7) regenerate from the scripts in `analysis/` and `scripts/`, whose seeds are fixed in their headers.
 
 ## Reproducibility
 
-The tagged commit `freeze-2026-08-13` is the frozen state of the analysis code at the end of the experimental phase; the files in `results/` were produced under it. Fine-tuning uses seed 42 throughout; the audit and repair scripts carry their own seeds and bootstrap draw counts in their headers. Trained checkpoints and exported latent arrays are large and regenerable and are not committed.
+Step-by-step instructions, including the exact fine-tuning commands, are in [REPRODUCING.md](REPRODUCING.md). In short: the tagged commit `freeze-2026-08-13` is the frozen state of the analysis code at the end of the experimental phase; the files in `results/` were produced under it. Fine-tuning uses seed 42 throughout; the audit and repair scripts carry their own seeds and bootstrap draw counts in their headers. Trained checkpoints and exported latent arrays are large and regenerable and are not committed. The two central analyses (the fidelity audit and the block transfer) run CPU-only from the committed files in `data/`, with no dataset download and no training.
 
 ## Environment
 
