@@ -12,7 +12,7 @@ The extracted feature tables, the θ target files and the label manifests are co
 
 ```
 python analysis/fidelity_audit.py        # audit: thesis Tables 4.9-4.10, Figure 4.2  -> f1_fidelity.json
-python analysis/block_transfer.py        # block transfer: Table 4.11, Figure 4.4    -> f2_blocks.json
+python analysis/block_transfer.py        # block transfer: Table 4.11, Figure 4.5    -> f2_blocks.json
 python analysis/fidelity_audit_verify.py # independent re-implementation of the audit
 python analysis/block_transfer_verify.py # independent re-implementation of block transfer
 ```
@@ -78,7 +78,7 @@ With the latents in place, the remaining thesis results regenerate as follows:
 | `analysis/phase_b2_infarct_decoding.py` + `scripts/_audit_paired_grid.py` | Tables 4.6–4.7 (decision rule; twelve-cell grid) | — |
 | `analysis/circular_geometry.py`, `analysis/floor_audit.py`, `analysis/cyclic_order_test.py` | §4.3 floors, anchors, angular structure | `results/floor_audit.json`, `results/floor_free_scores.txt` |
 | `analysis/acuity_stratified_transport.py` | §4.4 acuity test | (feeds `floor_audit.json`) |
-| `analysis/channel_repair.py` (+ `_verify`) | Table 4.12, Figure 4.5 (repair) | `results/f3_repair.json` |
+| `analysis/channel_repair.py` (+ `_verify`) | Table 4.12, Figure 4.6 (repair) | `results/f3_repair.json` |
 | `analysis/inlp_alignment.py`, `analysis/nonlinear_c2st.py`, `analysis/label_shift_bound.py` | §4.2 and Appendix A.4 | — |
 
 The supplementary grids of Table 4.8 and Appendix A.3 are frozen at `results/alpha_sweep_grid.txt` and `results/alpha_sweep_supplement.txt`.
