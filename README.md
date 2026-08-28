@@ -31,7 +31,7 @@ Every number in the thesis traces to a result file. The frozen copies live in `r
 | Table 4.13, Figure 4.3 (repair experiments) | `results/f3_repair.json` |
 | Independent re-implementation checks | `results/verify/` |
 
-Remaining values (for example the paired latent-versus-control grid of Table 4.7) regenerate from the scripts in `analysis/`, whose seeds are fixed in their headers.
+Remaining values (for example the paired latent-versus-control grid of Table 4.7) regenerate from the scripts in `analysis/` and `scripts/`, whose seeds are fixed in their headers.
 
 ## Reproducibility
 
