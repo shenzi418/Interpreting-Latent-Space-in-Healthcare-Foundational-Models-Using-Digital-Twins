@@ -1,0 +1,648 @@
+{
+  "block_structure": {
+    "ST_J60": [
+      "ST_J60_I",
+      "ST_J60_II",
+      "ST_J60_III",
+      "ST_J60_aVR",
+      "ST_J60_aVL",
+      "ST_J60_aVF",
+      "ST_J60_V1",
+      "ST_J60_V2",
+      "ST_J60_V3",
+      "ST_J60_V4",
+      "ST_J60_V5",
+      "ST_J60_V6"
+    ],
+    "Q_amp": [
+      "Q_amp_I",
+      "Q_amp_II",
+      "Q_amp_III",
+      "Q_amp_aVR",
+      "Q_amp_aVL",
+      "Q_amp_aVF",
+      "Q_amp_V1",
+      "Q_amp_V2",
+      "Q_amp_V3",
+      "Q_amp_V4",
+      "Q_amp_V5",
+      "Q_amp_V6"
+    ],
+    "R_amp": [
+      "R_amp_I",
+      "R_amp_II",
+      "R_amp_III",
+      "R_amp_aVR",
+      "R_amp_aVL",
+      "R_amp_aVF",
+      "R_amp_V1",
+      "R_amp_V2",
+      "R_amp_V3",
+      "R_amp_V4",
+      "R_amp_V5",
+      "R_amp_V6"
+    ],
+    "T_amp": [
+      "T_amp_I",
+      "T_amp_II",
+      "T_amp_III",
+      "T_amp_aVR",
+      "T_amp_aVL",
+      "T_amp_aVF",
+      "T_amp_V1",
+      "T_amp_V2",
+      "T_amp_V3",
+      "T_amp_V4",
+      "T_amp_V5",
+      "T_amp_V6"
+    ],
+    "globals": [
+      "QRS_duration_ms",
+      "QT_interval_ms",
+      "P_duration_ms",
+      "ST_J60_avg_mV",
+      "T_amplitude_mV",
+      "heart_rate_bpm"
+    ],
+    "full54": [
+      "ST_J60_I",
+      "ST_J60_II",
+      "ST_J60_III",
+      "ST_J60_aVR",
+      "ST_J60_aVL",
+      "ST_J60_aVF",
+      "ST_J60_V1",
+      "ST_J60_V2",
+      "ST_J60_V3",
+      "ST_J60_V4",
+      "ST_J60_V5",
+      "ST_J60_V6",
+      "Q_amp_I",
+      "Q_amp_II",
+      "Q_amp_III",
+      "Q_amp_aVR",
+      "Q_amp_aVL",
+      "Q_amp_aVF",
+      "Q_amp_V1",
+      "Q_amp_V2",
+      "Q_amp_V3",
+      "Q_amp_V4",
+      "Q_amp_V5",
+      "Q_amp_V6",
+      "R_amp_I",
+      "R_amp_II",
+      "R_amp_III",
+      "R_amp_aVR",
+      "R_amp_aVL",
+      "R_amp_aVF",
+      "R_amp_V1",
+      "R_amp_V2",
+      "R_amp_V3",
+      "R_amp_V4",
+      "R_amp_V5",
+      "R_amp_V6",
+      "T_amp_I",
+      "T_amp_II",
+      "T_amp_III",
+      "T_amp_aVR",
+      "T_amp_aVL",
+      "T_amp_aVF",
+      "T_amp_V1",
+      "T_amp_V2",
+      "T_amp_V3",
+      "T_amp_V4",
+      "T_amp_V5",
+      "T_amp_V6",
+      "QRS_duration_ms",
+      "QT_interval_ms",
+      "P_duration_ms",
+      "ST_J60_avg_mV",
+      "T_amplitude_mV",
+      "heart_rate_bpm"
+    ],
+    "axis2": [
+      "R_amp_I",
+      "R_amp_aVF"
+    ]
+  },
+  "pre_stated_prediction": "PRE-STATED PREDICTION (written to disk before computing any result below):\nFrom the fidelity audit (feature-level territory eta2: ST_J60 sim 0.056 vs real\n0.016; Q_amp real 0.077 vs sim 0.007; R_amp real 0.065 vs sim 0.010):\n P1. ST_J60 block: STRONG in-domain (the simulator encodes territory in acute\n     injury current), and transfers WORST (lowest transfer efficiency).\n P2. Q_amp and R_amp blocks: WEAKER in-domain, but transfer BEST (highest\n     efficiency) because the real domain carries territory there.\n P3. axis2 [R_amp_I, R_amp_aVF]: the fit-free axis transfers near-perfectly in\n     principle, BUT the simulator carries almost no territory in the frontal\n     axis (eta2=0.0020, below the constant floor in-domain). Therefore its\n     RIDGE FIT on MedalCare must be near the in-domain constant floor, the\n     efficiency denominator (in-domain excess) is ~0, and the efficiency ratio\n     is unstable/explosive rather than ~1. Implication to test: axis2 shows\n     near-floor in-domain F1 excess, yet non-trivial cross-domain F1 (>0.1535\n     floor), giving efficiency >> 1 or an undefined ratio -- the extreme case\n     of 'the simulator fails to teach a channel that works in reality'.\n P4. Summary: Spearman rho between per-block eta2_sim (features directly) and\n     transfer efficiency is NEGATIVE -- the simulator teaches the readout to\n     rely on exactly the channels that do not transfer.\n",
+  "floors": {
+    "R_floor_ptbxl": 0.29215682392618303,
+    "R_floor_medalcare": 0.09319111447098924,
+    "constF1_ptbxl": 0.15341455594741904,
+    "constF1_medalcare": 0.12571461239423737,
+    "n_medalcare": 6547,
+    "n_ptbxl": 4324
+  },
+  "per_block": {
+    "ST_J60": {
+      "n_features": 12,
+      "n_finite_medalcare": 6474,
+      "n_finite_ptbxl": 4286,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 22.275429519995587,
+      "alpha_transport": 22.275429519995587,
+      "in": {
+        "macro_f1": 0.38434637088044,
+        "eta2": 0.08279453914250581,
+        "R": 0.2677452535524933
+      },
+      "cross_source": {
+        "macro_f1": 0.1550511673546174,
+        "eta2": 0.015822172840053043,
+        "R": 0.26938731145009986
+      },
+      "cross_target": {
+        "macro_f1": 0.2299949645611047,
+        "eta2": 0.010946150456764954,
+        "R": 0.1199392911777024
+      }
+    },
+    "Q_amp": {
+      "n_features": 12,
+      "n_finite_medalcare": 6456,
+      "n_finite_ptbxl": 4305,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 182.33480008684424,
+      "alpha_transport": 182.33480008684424,
+      "in": {
+        "macro_f1": 0.26386202102646733,
+        "eta2": 0.01607455839200007,
+        "R": 0.18597908104668895
+      },
+      "cross_source": {
+        "macro_f1": 0.23799267528853743,
+        "eta2": 0.04142008093377993,
+        "R": 0.12449228559451517
+      },
+      "cross_target": {
+        "macro_f1": 0.24126124829510764,
+        "eta2": 0.0230132689595777,
+        "R": 0.17014674871152843
+      }
+    },
+    "R_amp": {
+      "n_features": 12,
+      "n_finite_medalcare": 6513,
+      "n_finite_ptbxl": 4315,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 22.275429519995587,
+      "alpha_transport": 22.275429519995587,
+      "in": {
+        "macro_f1": 0.306658245995665,
+        "eta2": 0.02095939869951618,
+        "R": 0.1853669473913108
+      },
+      "cross_source": {
+        "macro_f1": 0.22979944286782877,
+        "eta2": 0.03059685571256705,
+        "R": 0.3223344518722648
+      },
+      "cross_target": {
+        "macro_f1": 0.19358183448781546,
+        "eta2": 0.05394688209744521,
+        "R": 0.24209150122970566
+      }
+    },
+    "T_amp": {
+      "n_features": 12,
+      "n_finite_medalcare": 6477,
+      "n_finite_ptbxl": 4287,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 44.89251258218608,
+      "alpha_transport": 44.89251258218608,
+      "in": {
+        "macro_f1": 0.4017985837530389,
+        "eta2": 0.11039653921746954,
+        "R": 0.31113736244541834
+      },
+      "cross_source": {
+        "macro_f1": 0.22203107765303404,
+        "eta2": 0.0250188021764313,
+        "R": 0.2220848078077808
+      },
+      "cross_target": {
+        "macro_f1": 0.3012084427853504,
+        "eta2": 0.05884336471073868,
+        "R": 0.2164340728006721
+      }
+    },
+    "globals": {
+      "n_features": 6,
+      "n_finite_medalcare": 4412,
+      "n_finite_ptbxl": 3254,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 182.33480008684424,
+      "alpha_transport": 182.33480008684424,
+      "in": {
+        "macro_f1": 0.2763001910500095,
+        "eta2": 0.029141772134524062,
+        "R": 0.18617588372562036
+      },
+      "cross_source": {
+        "macro_f1": 0.21561033054042145,
+        "eta2": 0.07657120614417903,
+        "R": 0.360430869760576
+      },
+      "cross_target": {
+        "macro_f1": 0.29436929793830546,
+        "eta2": 0.004594483795455272,
+        "R": 0.18403217104566297
+      }
+    },
+    "full54": {
+      "n_features": 54,
+      "n_finite_medalcare": 4412,
+      "n_finite_ptbxl": 3254,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 5.484416576121021,
+      "alpha_transport": 5.484416576121021,
+      "in": {
+        "macro_f1": 0.44944291556041527,
+        "eta2": 0.23177852405733734,
+        "R": 0.38911612205938484
+      },
+      "cross_source": {
+        "macro_f1": 0.25111689797642556,
+        "eta2": 0.022409093101052484,
+        "R": 0.13891218374425643
+      },
+      "cross_target": {
+        "macro_f1": 0.31269390857322354,
+        "eta2": 0.1446170281302368,
+        "R": 0.19916742723703124
+      }
+    },
+    "axis2": {
+      "n_features": 2,
+      "n_finite_medalcare": 6513,
+      "n_finite_ptbxl": 4315,
+      "n_scored_medalcare": 6547,
+      "n_scored_ptbxl": 4324,
+      "alpha_cv_median": 182.33480008684424,
+      "alpha_transport": 182.33480008684424,
+      "in": {
+        "macro_f1": 0.17508736805867486,
+        "eta2": 0.01167399663828695,
+        "R": 0.11321797545124933
+      },
+      "cross_source": {
+        "macro_f1": 0.17471367631256315,
+        "eta2": 0.03397013915910334,
+        "R": 0.2539649622689398
+      },
+      "cross_target": {
+        "macro_f1": 0.17784082762425724,
+        "eta2": 0.028392225102036893,
+        "R": 0.27343413824502716
+      }
+    }
+  },
+  "efficiency": {
+    "ST_J60": {
+      "eff_source": 0.006327959941105522,
+      "eta2_ratio_source": 0.19110164757146542,
+      "eff_target": 0.2960982404555356,
+      "eta2_ratio_target": 0.13220860421632952,
+      "excess_in": 0.2586317584862026
+    },
+    "Q_amp": {
+      "eff_source": 0.6122309508264363,
+      "eta2_ratio_source": 2.5767476731674153,
+      "eff_target": 0.6358909893239493,
+      "eta2_ratio_target": 1.4316579279111556,
+      "excess_in": 0.13814740863222996
+    },
+    "R_amp": {
+      "eff_source": 0.4221474135346814,
+      "eta2_ratio_source": 1.4598155295969124,
+      "eff_target": 0.22198779664652157,
+      "eta2_ratio_target": 2.573875466126349,
+      "excess_in": 0.18094363360142762
+    },
+    "T_amp": {
+      "eff_source": 0.24853497060298466,
+      "eta2_ratio_source": 0.22662668914961998,
+      "eff_target": 0.5353222286340447,
+      "eta2_ratio_target": 0.5330182008226132,
+      "excess_in": 0.2760839713588015
+    },
+    "globals": {
+      "eff_source": 0.4130261021553564,
+      "eta2_ratio_source": 2.627541173224179,
+      "eff_target": 0.9360440969788937,
+      "eta2_ratio_target": 0.15765972550489535,
+      "excess_in": 0.15058557865577216
+    },
+    "full54": {
+      "eff_source": 0.3018035218837614,
+      "eta2_ratio_source": 0.09668321598039396,
+      "eff_target": 0.4920155298995973,
+      "eta2_ratio_target": 0.6239449004967409,
+      "excess_in": 0.3237283031661779
+    },
+    "axis2": {
+      "eff_source": 0.4313941986528731,
+      "eta2_ratio_source": 2.9098979733891834,
+      "eff_target": 0.49473178776675203,
+      "eta2_ratio_target": 2.4320912521868934,
+      "excess_in": 0.049372755664437495
+    }
+  },
+  "paired_cross": {
+    "cross_source:ST_J60_vs_Q_amp": {
+      "f1_A": 0.1550511673546174,
+      "f1_B": 0.23799267528853743,
+      "delta": -0.08294150793392002,
+      "ci95": [
+        -0.09988394247843917,
+        -0.06702818032435202
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    },
+    "cross_source:ST_J60_vs_R_amp": {
+      "f1_A": 0.1550511673546174,
+      "f1_B": 0.22979944286782877,
+      "delta": -0.07474827551321137,
+      "ci95": [
+        -0.09358802338920408,
+        -0.05642818626953787
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    },
+    "cross_source:full54_vs_T_amp": {
+      "f1_A": 0.25111689797642556,
+      "f1_B": 0.22203107765303404,
+      "delta": 0.02908582032339152,
+      "ci95": [
+        0.015440226592233952,
+        0.04354556342757984
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    },
+    "cross_target:ST_J60_vs_Q_amp": {
+      "f1_A": 0.2299949645611047,
+      "f1_B": 0.24126124829510764,
+      "delta": -0.011266283734002958,
+      "ci95": [
+        -0.029336640927816803,
+        0.005801299256374051
+      ],
+      "p_swap": 0.21578421578421578,
+      "n_draws": 1000
+    },
+    "cross_target:ST_J60_vs_R_amp": {
+      "f1_A": 0.2299949645611047,
+      "f1_B": 0.19358183448781546,
+      "delta": 0.036413130073289224,
+      "ci95": [
+        0.019735089510266812,
+        0.05578494589686784
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    },
+    "cross_target:full54_vs_T_amp": {
+      "f1_A": 0.31269390857322354,
+      "f1_B": 0.3012084427853504,
+      "delta": 0.011485465787873128,
+      "ci95": [
+        -0.006900490234336323,
+        0.029272198156521958
+      ],
+      "p_swap": 0.22077922077922077,
+      "n_draws": 1000
+    }
+  },
+  "paired_in": {
+    "in:ST_J60_vs_Q_amp": {
+      "f1_A": 0.38434637088044,
+      "f1_B": 0.26386202102646733,
+      "delta": 0.12048434985397266,
+      "ci95": [
+        0.10377195032533529,
+        0.1378161372933416
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    },
+    "in:ST_J60_vs_R_amp": {
+      "f1_A": 0.38434637088044,
+      "f1_B": 0.306658245995665,
+      "delta": 0.077688124884775,
+      "ci95": [
+        0.061631727157817784,
+        0.09362086889593692
+      ],
+      "p_swap": 0.000999000999000999,
+      "n_draws": 1000
+    }
+  },
+  "axis2_floor_check": {
+    "in_ci": [
+      0.16844539106069145,
+      0.1815284322049003
+    ],
+    "cross_source_ci": [
+      0.1649749084687776,
+      0.18462997342329787
+    ],
+    "cross_target_ci": [
+      0.16812698072085647,
+      0.1874701279690898
+    ]
+  },
+  "block_eta2_features": {
+    "sim_mean": {
+      "ST_J60": 0.05997630317870889,
+      "Q_amp": 0.008657915036358562,
+      "R_amp": 0.006548030276490496,
+      "T_amp": 0.03156443708391277,
+      "globals": 0.015842670877369357,
+      "full54": 0.02548178244759009,
+      "axis2": 0.006073870010725328
+    },
+    "real_mean": {
+      "ST_J60": 0.01759654535829913,
+      "Q_amp": 0.08793881727296789,
+      "R_amp": 0.06871581037526851,
+      "T_amp": 0.027779751908146747,
+      "globals": 0.03772802715562577,
+      "full54": 0.04908776410944337,
+      "axis2": 0.09504756538607045
+    },
+    "per_feature_sim": {
+      "ST_J60_I": 0.07401639689399153,
+      "ST_J60_II": 0.06826446883693255,
+      "ST_J60_III": 0.07508974304178373,
+      "ST_J60_aVR": 0.06697172667708304,
+      "ST_J60_aVL": 0.07606054978601035,
+      "ST_J60_aVF": 0.07403569683674421,
+      "ST_J60_V1": 0.08579350190658251,
+      "ST_J60_V2": 0.039741077603612465,
+      "ST_J60_V3": 0.023718199373428988,
+      "ST_J60_V4": 0.00591622870841936,
+      "ST_J60_V5": 0.044265323295899814,
+      "ST_J60_V6": 0.08584272518401816,
+      "Q_amp_I": 0.006680454761619188,
+      "Q_amp_II": 0.0048889050546171466,
+      "Q_amp_III": 0.005791924843117006,
+      "Q_amp_aVR": 0.0029837179048362254,
+      "Q_amp_aVL": 0.005684885929562929,
+      "Q_amp_aVF": 0.0012151981197170564,
+      "Q_amp_V1": 0.003817648139033293,
+      "Q_amp_V2": 0.009799648077708233,
+      "Q_amp_V3": 0.00908505559811745,
+      "Q_amp_V4": 0.005648841406277081,
+      "Q_amp_V5": 0.017478697175717366,
+      "Q_amp_V6": 0.030820003425979778,
+      "R_amp_I": 0.0011189185288500126,
+      "R_amp_II": 0.013318531893161735,
+      "R_amp_III": 0.0063930148256659885,
+      "R_amp_aVR": 0.00217440888404787,
+      "R_amp_aVL": 0.0025236317389376478,
+      "R_amp_aVF": 0.011028821492600644,
+      "R_amp_V1": 0.0011558261491737287,
+      "R_amp_V2": 0.004385517709469185,
+      "R_amp_V3": 0.0051084825320389,
+      "R_amp_V4": 0.002928410420642475,
+      "R_amp_V5": 0.010138145703462763,
+      "R_amp_V6": 0.018302653439834997,
+      "T_amp_I": 0.04424389274729668,
+      "T_amp_II": 0.04028065813535413,
+      "T_amp_III": 0.05814096153911229,
+      "T_amp_aVR": 0.0247748574399803,
+      "T_amp_aVL": 0.056297169965377744,
+      "T_amp_aVF": 0.05701010585309012,
+      "T_amp_V1": 0.012456962649131527,
+      "T_amp_V2": 0.020216705878700877,
+      "T_amp_V3": 0.01714167434636256,
+      "T_amp_V4": 0.006920409026830677,
+      "T_amp_V5": 0.014851431031208876,
+      "T_amp_V6": 0.026438416394507527,
+      "QRS_duration_ms": 0.015050775270377407,
+      "QT_interval_ms": 0.02315949305467824,
+      "P_duration_ms": 0.005950673217482865,
+      "ST_J60_avg_mV": 0.008789405653580438,
+      "T_amplitude_mV": 0.04028065813535413,
+      "heart_rate_bpm": 0.0018250199327430596
+    },
+    "per_feature_real": {
+      "ST_J60_I": 0.018777221991572116,
+      "ST_J60_II": 0.004561053438466502,
+      "ST_J60_III": 0.0062245078469892225,
+      "ST_J60_aVR": 0.015902904735419856,
+      "ST_J60_aVL": 0.012496451447706773,
+      "ST_J60_aVF": 0.0028205679352285656,
+      "ST_J60_V1": 0.022713217035750955,
+      "ST_J60_V2": 0.026291842516891806,
+      "ST_J60_V3": 0.030461958661383487,
+      "ST_J60_V4": 0.01841841788802454,
+      "ST_J60_V5": 0.023879518320391948,
+      "ST_J60_V6": 0.0286108824817638,
+      "Q_amp_I": 0.03170363494032289,
+      "Q_amp_II": 0.14675433805586965,
+      "Q_amp_III": 0.32436877739899844,
+      "Q_amp_aVR": 0.06776609568705755,
+      "Q_amp_aVL": 0.06329985657091873,
+      "Q_amp_aVF": 0.2213417989268071,
+      "Q_amp_V1": 0.008320209899499309,
+      "Q_amp_V2": 0.04261959688530453,
+      "Q_amp_V3": 0.047549253215412104,
+      "Q_amp_V4": 0.02293045593994376,
+      "Q_amp_V5": 0.0330660674705245,
+      "Q_amp_V6": 0.045545722284955965,
+      "R_amp_I": 0.10019793816062673,
+      "R_amp_II": 0.027768917388117438,
+      "R_amp_III": 0.13339606191110867,
+      "R_amp_aVR": 0.04335670117809557,
+      "R_amp_aVL": 0.1332515073732858,
+      "R_amp_aVF": 0.08989719261151419,
+      "R_amp_V1": 0.01891447879644905,
+      "R_amp_V2": 0.055448611576494417,
+      "R_amp_V3": 0.07214300656061524,
+      "R_amp_V4": 0.03918538492145322,
+      "R_amp_V5": 0.05146012820045336,
+      "R_amp_V6": 0.059569795825008674,
+      "T_amp_I": 0.03630663931280552,
+      "T_amp_II": 0.02012658090599065,
+      "T_amp_III": 0.07727826964846109,
+      "T_amp_aVR": 0.007208138312732079,
+      "T_amp_aVL": 0.06698805017431997,
+      "T_amp_aVF": 0.05903224164415381,
+      "T_amp_V1": 0.002650355681490936,
+      "T_amp_V2": 0.009577931183415359,
+      "T_amp_V3": 0.014068314218919556,
+      "T_amp_V4": 0.01937541880718947,
+      "T_amp_V5": 0.01590996200989504,
+      "T_amp_V6": 0.004835120998387526,
+      "QRS_duration_ms": 0.10855423589005525,
+      "QT_interval_ms": 0.055624665000039056,
+      "P_duration_ms": 0.010522430207819533,
+      "ST_J60_avg_mV": 0.027070055778092905,
+      "T_amplitude_mV": 0.02012658090599065,
+      "heart_rate_bpm": 0.0044701951517571985
+    }
+  },
+  "spearman": {
+    "5 natural blocks|source": {
+      "rho": -0.8999999999999998,
+      "p": 0.03738607346849874,
+      "n_blocks": 5,
+      "blocks": [
+        "ST_J60",
+        "Q_amp",
+        "R_amp",
+        "T_amp",
+        "globals"
+      ]
+    },
+    "5 natural blocks|target": {
+      "rho": 0.09999999999999999,
+      "p": 0.8728885715695383,
+      "n_blocks": 5,
+      "blocks": [
+        "ST_J60",
+        "Q_amp",
+        "R_amp",
+        "T_amp",
+        "globals"
+      ]
+    },
+    "5 blocks + axis2|source": {
+      "rho": -0.8285714285714287,
+      "p": 0.04156268221574334,
+      "n_blocks": 6,
+      "blocks": [
+        "ST_J60",
+        "Q_amp",
+        "R_amp",
+        "T_amp",
+        "globals",
+        "axis2"
+      ]
+    },
+    "5 blocks + axis2|target": {
+      "rho": 0.14285714285714288,
+      "p": 0.7871720116618075,
+      "n_blocks": 6,
+      "blocks": [
+        "ST_J60",
+        "Q_amp",
+        "R_amp",
+        "T_amp",
+        "globals",
+        "axis2"
+      ]
+    }
+  }
+}

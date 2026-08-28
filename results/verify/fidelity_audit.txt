@@ -1,0 +1,112 @@
+V-F1 verifier. sim n=6547 (1100 groups), real n=4324 (3794 groups)
+sim class counts: [2199, 1600, 550, 2198]
+real class counts: [1624, 455, 331, 1914]
+(their all54 denominators: sim [2199,1600,550,2198], real [1624,455,331,1914])
+
+ETA2 REPRODUCTION (my loop implementation vs their JSON):
+  max|diff| eta2_4c sim 5.061e-06  real 6.258e-06 ; eta2_2c sim 1.603e-06  real 7.369e-06
+  axis circ eta2 4c: mine sim 0.002005 real 0.129732 | theirs 0.002006 / 0.129732
+  axis circ eta2 2c: mine sim 0.000449 real 0.109126 | theirs 0.000449 / 0.109126
+
+HEADLINE RHO REPRODUCTION:
+  4c 54feat: mine -0.3544 (p=8.55e-03) vs theirs -0.3544 (8.55e-03)
+  2c 54feat: mine -0.3155 (p=2.01e-02) vs theirs -0.3155 (2.01e-02)
+  4c 55 w/axis: mine -0.3796 (p=4.26e-03) vs theirs -0.3796 (4.26e-03)
+  4c 53 distinct (drop dup T_amplitude_mV): -0.3542 (p=9.26e-03)
+
+BLOCK DECOMPOSITION OF THE HEADLINE (4c):
+  block   mean_e2_sim  mean_e2_real  within-block Spearman (n)   p
+  ST          0.0600       0.0176    -0.2098 (12)          0.513
+  Q           0.0087       0.0879    -0.2797 (12)          0.379
+  R           0.0065       0.0687    +0.0350 (12)          0.914
+  T           0.0316       0.0278    +0.7063 (12)          0.010
+  GLOB        0.0158       0.0377    +0.6000 (6)          0.208
+  TRIVIAL COMPETITOR rho(block-mean-only sim, real) = -0.5873 (naive p=3.04e-06)
+  -> fraction of headline |rho| reproduced by block identity alone: 1.66
+  block-centered residual rho = 0.1313 (naive p=0.344)
+
+BLOCK-AWARE PERMUTATION NULLS for headline rho=-0.3544 (one-sided, rho<=obs):
+  N1 block-slot permutation only (within-block order intact): p = 0.1027
+     null mean 0.076, sd 0.289, 2.5/97.5 pct [-0.452, 0.607]
+  N2 block-slot + within-block lead permutation: p = 0.1408
+     null mean 0.005, sd 0.278, 2.5/97.5 pct [-0.511, 0.523]
+
+MY BLOCK BOOTSTRAP (400 draws, seed 424242, own code):
+  rho4 95% CI [-0.4370, -0.2498]  (theirs [-0.4395, -0.2478])
+  diff4c Q_amp_III    [0.2925, 0.3442]  (theirs [0.2901118598985418, 0.34034483025614753])
+  diff4c ST_J60_aVF   [-0.0814, -0.0604]  (theirs [-0.08096002557869823, -0.059274817101026875])
+  diff4c R_amp_V6     [0.0272, 0.0567]  (theirs [0.026571308664117967, 0.05610757709421239])
+  axis diff4c [0.1074, 0.1467]  (theirs [0.10759073495864868, 0.14898522198200226])
+  R_amp_V6 diff2c [-0.0223, -0.0108]  (theirs [-0.022289175447011526, -0.010950846844063424])
+
+CLAIM AUDITS (their JSON, their numbers):
+  count blind-spot features (diff4c CI_lo>0): 28  (+axis True); report said '29 features + axis'
+  count spurious (CI_hi<0): 14 ; report said 14
+  ST_J60 leads in spurious list: 9 -> ['ST_J60_I', 'ST_J60_II', 'ST_J60_III', 'ST_J60_aVR', 'ST_J60_aVL', 'ST_J60_aVF', 'ST_J60_V1', 'ST_J60_V5', 'ST_J60_V6']
+  headline said '8 of 12 ST_J60 leads'; numbers section said 9.
+  Q/R features in blind list: 22 of 24
+  Q/R NOT CI-confirmed blind: ['Q_amp_V1', 'Q_amp_V6']
+  SIGN-AGREEMENT CLAIM: violations with BOTH CIs significant: 1
+    R_amp_V6: diff4c +0.0413 CI [0.026571308664117967, 0.05610757709421239]  vs diff2c -0.0165 CI [-0.022289175447011526, -0.010950846844063424]
+  violations where 4c is significant (any 2c): ['R_amp_V5', 'R_amp_V6', 'T_amp_V4', 'T_amp_V6']
+
+MARGINAL-REALISM CLAIM (c) SENSITIVITY:
+  all 54: rho -0.2840 p 0.0374 (theirs -0.2840 / 0.0374)
+  excluding T-wave block+dup (n=41): rho 0.0828 p 0.6070
+  53 distinct (drop dup): rho -0.2841 p 0.0393
+  block-permutation null p (one-sided) for rho=-0.284: 0.1578
+
+AXIS MARGINALS: sim mean 68.0 deg SD 41.3; real mean 31.3 deg SD 37.9
+(established: SD 41.3 vs 37.9; their report: means 68.0 / 31.3)
+
+DONE verifier stage 1.
+
+====================================================================================================
+VERIFIER VERDICT (adversarial re-check, seed 777 / 424242, own code)
+
+REPRODUCED EXACTLY: all 54x4 eta2 point estimates (max|diff| 7.4e-06), axis circular
+eta2 (4c and 2c, both domains, to 6 decimals), all three headline Spearman rhos and
+naive p-values, |SMD| correlation (-0.2840/0.0374), axis marginals (68.0/31.3 deg,
+SD 41.3/37.9), class counts, block-bootstrap CIs (my 400-draw independent bootstrap:
+rho4 CI [-0.437,-0.250] vs theirs [-0.440,-0.248]; per-feature diff CIs agree to MC
+noise). Row alignment, block resampling, missingness audit: all clean.
+
+DEFECT 1 (significance framing). The headline p=8.55e-03 treats 54 features as
+independent observations; they sit in 4 lead-blocks + 6 globals with strong
+within-block dependence (plus one exact duplicate). A block-aware permutation null
+(permuting block slots, preserving within-block structure; 20000 draws) gives
+p = 0.103 (block-slot only) / 0.141 (block-slot + within-block lead permutation).
+"Significantly anti-correlated" does NOT survive a dependence-respecting null.
+The block-bootstrap CI [-0.44,-0.25] is valid but answers a different question
+(eta2 estimation noise for the FIXED feature set, not feature-level generality).
+
+DEFECT 2 (per-feature resolution overstated). Trivial competitor: replacing the sim
+eta2 vector by its 5 block means alone gives rho = -0.587 -- 1.66x MORE negative
+than the actual per-feature rho (-0.354). Block-centered residuals correlate
++0.131 (p=0.34). Within blocks: ST -0.21 (p=0.51), Q -0.28 (p=0.38), R +0.04
+(p=0.91), T +0.71 (p=0.010, POSITIVE), globals +0.60 (p=0.21). The inversion is
+entirely a block-level (ST/T-vs-Q/R) phenomenon -- i.e. the already-established
+channel-divergence result -- and at per-feature resolution WITHIN blocks the sim
+ranking is uncorrelated to positively correlated with reality. "It inverts the
+feature ranking" should read "it inverts the measure-block ranking".
+
+DEFECT 3 (|SMD| anti-correlation is a T-block artifact). rho(|SMD|,|gap|) = -0.284
+(p=0.037) flips to +0.083 (p=0.61) when the 12 T_amp features (+duplicate) are
+excluded; block-permutation p = 0.158. "Uncorrelated" is supported;
+"anticorrelated" is not robust.
+
+DEFECT 4 (small factual errors in the report text):
+ - "8 of 12 ST_J60 leads" -> 9 (all 6 limb + V1/V5/V6); their own numbers section says 9.
+ - "29 features + axis qualify" as blind spots -> 28 features + axis in their own JSON.
+ - "Sign of diff agrees with 4c for every CI-significant feature" is FALSE:
+   R_amp_V6 is CI-significant in BOTH endpoints with OPPOSITE signs
+   (4c +0.0413 [+0.027,+0.056] vs 2c -0.0165 [-0.022,-0.011]).
+ - "all 13 Q/R blind-spot candidates" -- no on-disk artifact defines 13 candidates;
+   from their own JSON 22 of 24 Q/R features are CI-confirmed (Q_amp_V1, Q_amp_V6 not).
+
+WHAT SURVIVES: the per-feature diff CIs (blind spots and spurious channels), the
+axis fidelity gap, the missingness caveats, the duplicate-column find, and the
+directional block-level story all reproduce and held up under my own bootstrap.
+The rank-inversion HEADLINE needs reframing: negative rho is a stable point
+estimate for this fixed feature set, but it is carried by block identity and is
+not feature-level significant under a dependence-respecting null.

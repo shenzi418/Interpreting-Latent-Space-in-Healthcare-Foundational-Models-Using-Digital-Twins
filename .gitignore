@@ -48,3 +48,11 @@ Thumbs.db
 
 # Scratch scripts and outputs at repo root (audit provenance lives in reports/)
 /tmp_*
+
+# supervisor-facing release hygiene (2026-08-28)
+CLAUDE.md
+.claude/
+openspec/
+thesis_writeup/
+finetune_ECGFounder.ipynb
+t1b_summary.txt

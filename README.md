@@ -1,21 +1,42 @@
-# Interpreting-Latent-Space-in-Healthcare-Foundational-Models-Using-Digital-Twins
+# Interpreting the Latent Space in ECG Digital-Twin Foundation Models
 
-This project explores biomedical digital twins as a tool to interpret latent space representations and assesses their potential to improve trust in healthcare foundational models (FMs).
+Code and frozen results for an MRes thesis (Artificial Intelligence and Machine Learning, Imperial College London; supervisor: Dr Marta Varela). The project adapts a pre-trained ECG foundation model (ECGFounder) to a cardiac digital twin (MedalCare-XL) and to a real clinical cohort (PTB-XL), asks whether infarct territory can be read from the latent space within and across the synthetic-to-real gap, and introduces an informativeness-fidelity audit that measures, per ECG feature, how much territory information each domain carries.
 
-## Project Structure
+## Repository contents
 
-The repository currently contains scripts for preparing MedalCare-XL ECG data, creating deterministic splits, fine-tuning the ECGFounder backbone, and evaluating zero-shot or baseline performance.
+| Path | Contents |
+|---|---|
+| `scripts/` | Data preparation, split generation, fine-tuning, latent export, feature extraction |
+| `analysis/` | The analysis pipelines: territory decoding, circular geometry and floors, the fidelity audit, block transfer, channel repair, alignment diagnostics |
+| `losses/`, `metrics/`, `net1d.py`, `finetune_model.py`, `util.py` | Model code: backbone, adapters, MMD losses, evaluation metrics |
+| `data/` | Seeded split manifests and simulation-parameter (θ) target files |
+| `results/` | Frozen result files behind the thesis numbers (see tracing table below) |
 
-- `scripts/` – CLI utilities for data preparation (`prepare_medalcare.py`), deterministic splits (`make_splits.py`), training (`finetune_multilabel.py`), zero-shot evaluation (`eval_zero_shot.py`), and dataset definitions.
-- `metrics/`, `losses/` – Robust multilabel metrics (AP, Brier, safe ROC-AUC) and an optional MMD alignment loss.
-- `viz/plot_waveforms.py` – Visual sanity checks for converted ECG waveforms.
-- `data/` – Deterministic MedalCare manifest and split summary artifacts.
-- `README_w1.md` – Week-one progress report with step-by-step reproduction instructions and result summaries.
+The two datasets are public and are not redistributed here: PTB-XL v1.0.3 (PhysioNet, CC BY 4.0) and MedalCare-XL (Zenodo, CC BY 4.0). ECGFounder weights are released by their authors under the MIT licence.
 
-Refer to `README_w1.md` to reproduce the current experiments end-to-end.
+## Tracing thesis numbers to files
 
-## MedalCare splits
-- `data/medalcare_filtered_manifest_dataset_split.csv` stores the original
-  dataset split (`train`/`val`/`test`) and a `run_id` derived from
-  `original_csv_path`.
-- Generate it with: `python scripts/add_medalcare_splits.py`
+Every number in the thesis traces to a result file. The frozen copies live in `results/`:
+
+| Thesis location | File |
+|---|---|
+| Table 4.1 (encoder classification) | `results/encoder_metrics/*.json` |
+| Table 4.2 (loading configurations, C2ST/MMD/kNN) | `results/c2st_loader_conditions.json` |
+| Table 4.3 (77-cell lead-permutation sweep) | `results/lead_permutation_sweep.json` |
+| Constant-predictor floors and anchor angles (§3.6, §4.3) | `results/floor_audit.json` |
+| Table 4.8 and Appendix A.3 (α sweep) | `results/alpha_sweep_grid.txt`, `results/alpha_sweep_supplement.txt` |
+| Floor-free scores and nulls (§4.3) | `results/floor_free_scores.txt` |
+| Tables 4.10–4.11, Figure 4.1 (fidelity audit) | `results/f1_fidelity.json` |
+| Table 4.12, Figure 4.2 (block transfer and prediction) | `results/f2_blocks.json` |
+| Table 4.13, Figure 4.3 (repair experiments) | `results/f3_repair.json` |
+| Independent re-implementation checks | `results/verify/` |
+
+Remaining values (for example the paired latent-versus-control grid of Table 4.7) regenerate from the scripts in `analysis/`, whose seeds are fixed in their headers.
+
+## Reproducibility
+
+The tagged commit `freeze-2026-08-13` is the frozen state of the analysis code at the end of the experimental phase; the files in `results/` were produced under it. Fine-tuning uses seed 42 throughout; the audit and repair scripts carry their own seeds and bootstrap draw counts in their headers. Trained checkpoints and exported latent arrays are large and regenerable and are not committed.
+
+## Environment
+
+Python 3.10, PyTorch 2.9 (CUDA 12.8), wfdb, neurokit2, scikit-learn. See `requirements.txt`.

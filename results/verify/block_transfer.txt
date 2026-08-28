@@ -1,0 +1,107 @@
+ADVERSARIAL VERIFICATION: F2-block-transfer
+==============================================================================
+n MedalCare 6547 (expect 6547), n PTB-XL 4324 (expect 4324)
+MedalCare phi-vs-territory nearest-anchor agreement: 0.9276
+block partition covers 54/54 features, sizes: {'ST_J60': 12, 'Q_amp': 12, 'R_amp': 12, 'T_amp': 12, 'globals': 6, 'full54': 54, 'axis2': 2}
+floors (independent): R_p 0.29216 R_m 0.09319 F1_p 0.1534 F1_m 0.1257
+
+Per-block replication (seed 0 folds, eigh ridge, own metrics)
+block       alpha   F1_in  F1_src  F1_tgt  eff_src  eff_tgt
+ST_J60      22.28  0.3843  0.1551  0.2300    0.006    0.296
+Q_amp       182.3  0.2639  0.2380  0.2413    0.612    0.636
+R_amp       22.28  0.3067  0.2298  0.1936    0.422    0.222
+T_amp       44.89  0.4018  0.2220  0.3012    0.249    0.535
+globals     182.3  0.2763  0.2156  0.2944    0.413    0.936
+full54      5.484  0.4494  0.2511  0.3127    0.302    0.492
+axis2       182.3  0.1751  0.1747  0.1778    0.431    0.495
+max |F1 dev| vs their reported per-block numbers: 0.000000
+
+block eta2 means (sim | real), independent ANOVA code:
+  ST_J60   0.0600 | 0.0176
+  Q_amp    0.0087 | 0.0879
+  R_amp    0.0065 | 0.0687
+  T_amp    0.0316 | 0.0278
+  globals  0.0158 | 0.0377
+  axis2    0.0061 | 0.0950
+
+DECISIVE STATISTIC (independent): Spearman rho(eta2_sim, efficiency)
+  [5blocks src] rho=-0.900  exact perm p: one-sided(neg) 0.0417, two-sided 0.0833
+  [5blocks tgt] rho=+0.100  exact perm p: one-sided(neg) 0.6083, two-sided 0.9500
+  [6blocks src] rho=-0.829  exact perm p: one-sided(neg) 0.0292, two-sided 0.0583
+  [6blocks tgt] rho=+0.143  exact perm p: one-sided(neg) 0.6431, two-sided 0.8028
+
+Decomposition / competitors of the headline correlation (source scaler):
+  eta2_sim vs eff_src                        rho=-0.900 (exact 2-sided p=0.0833)
+  eta2_sim vs raw F1_src (numerator only)    rho=-0.800 (exact 2-sided p=0.1333)
+  eta2_sim vs F1_in (denominator)            rho=+0.600 (exact 2-sided p=0.3500)
+  eta2_real vs eff_src (competitor)          rho=+1.000 (exact 2-sided p=0.0167)
+  eta2_real vs raw F1_src                    rho=+0.900 (exact 2-sided p=0.0833)
+  eta2_sim vs eta2_real (fidelity mismatch)  rho=-0.900 (exact 2-sided p=0.0833)
+
+Fold-seed robustness (in-domain CV seed 7 instead of 0):
+  [5blocks src, seed7] rho=-0.700 one-sided(neg) p=0.1167
+  [6blocks src, seed7] rho=-0.714 one-sided(neg) p=0.0681
+  seed-7 F1_in per block: ST_J60 0.3850, Q_amp 0.2677, R_amp 0.3139, T_amp 0.3963, globals 0.2758, axis2 0.1741
+
+Independent paired re-runs (2000 draws, seed 42):
+  [src] ST_J60 vs Q_amp: Delta -0.0829 CI [-0.0999,-0.0666] p=0.0005
+  [tgt] ST_J60 vs R_amp: Delta +0.0364 CI [+0.0183,+0.0544] p=0.0005
+ST_J60 source F1 0.1551 patient-boot CI [0.1468,0.1641] vs const floor 0.1534 -> at-floor claim OK
+
+P3 competitor: axis2 features fit on PTB-XL itself (5-fold patient CV):
+  axis2 real-fit CV F1 = 0.2997  (sim-fit transported: 0.1747/0.1778; established fit-free number 0.3043)
+  ST_J60 real-fit CV F1 = 0.2735
+  full54 real-fit CV F1 = 0.4703
+
+Done.
+
+==============================================================================
+VERDICT: CONFIRMED_WITH_CORRECTION
+
+REPRODUCED EXACTLY (independent eigh-based GCV ridge, own imputation/F1/eta2/
+CORAL/efficiency code, same fold seed): every per-block F1 (in/src/tgt) matches
+their report to 6 decimals (max dev 0.000000); alphas, floors (0.1534/0.1257,
+R 0.29216/0.09319), block eta2 means, efficiencies (ST 0.006, Q 0.612 etc.),
+rho values (-0.900 / -0.829 / +0.100 / +0.143), paired Deltas (ST-Q src
+-0.0829, ST-R tgt +0.0364, both p at permutation floor with an independent
+2000-draw seed-42 rerun), and the ST-at-floor claim (patient-boot CI
+[0.1468, 0.1641] contains the 0.1534 floor). Block partition covers 54/54
+features with no silent drops; feature_names identical across domains;
+MedalCare keying via idx_in_split and PTB-XL positional keying verified
+(phi->nearest-anchor agrees with territory_4c on 92.8pct, consistent with
+territory being phi-derived with the known LCX boundary case). No target-domain
+statistic enters the source-scaler path (MedalCare medians and MedalCare mu/sd
+only); PTB-XL stats appear only inside the declared CORAL mode.
+
+CORRECTION 1 (the only defect that changes a reported number): the Spearman
+p-values are scipy t-approximations, invalid at n=5/6. Exact permutation:
+  5 blocks,  rho=-0.900: one-sided(neg) p=0.0417, two-sided p=0.0833
+  6 blocks,  rho=-0.829: one-sided(neg) p=0.0292, two-sided p=0.0583
+The pre-stated P4 is directional (negative), so the one-sided test is the
+pre-registered one and survives (<0.05) -- but the reported p=0.037/p=0.042
+must be replaced by exact one-sided 0.042/0.029, and it must be said that the
+exact TWO-sided values (0.083/0.058) cross 0.05.
+
+CORRECTION 2 (robustness, quantified): the headline rho is CV-fold-seed
+sensitive. Refitting the in-domain CV with fold seed 7 instead of 0 gives
+rho=-0.700 (one-sided exact p=0.1167) on 5 blocks and rho=-0.714 (p=0.0681)
+on 6 blocks -- the Spearman loses nominal significance under a different fold
+split. The block-level ORDER STATISTICS that carry the story are robust (ST
+worst/at floor under source, paired p~0.001 vs Q and R; Q best), but the
+summary rho should be reported as directional and fragile, per their own
+caveat 2, now with numbers.
+
+CONTEXT FINDINGS (not defects):
+- Killer competitor: eta2_real predicts eff_src at rho=+1.000 (exact two-sided
+  p=0.0167) -- real-domain informativeness is a strictly stronger predictor of
+  transfer than sim informativeness, and eta2_sim vs eta2_real is itself
+  rho=-0.900. The headline correlation is thus largely the sim/real fidelity
+  MISMATCH plus cross-F1 tracking real informativeness -- which is exactly the
+  thesis claim, so this reframes rather than breaks it.
+- Numerator-only check: eta2_sim vs raw cross F1_src rho=-0.800 -- the negative
+  relation is not an artifact of dividing by in-domain excess (which alone
+  correlates only +0.6).
+- P3 competitor: fitting the same two axis features ON PTB-XL (5-fold
+  patient-disjoint CV) gives F1 0.2997, corroborating the established 0.3043
+  and the claim that the sim-fit transport (0.1747/0.1778) destroys a channel
+  worth ~0.30 in reality. ST_J60 real-fit 0.2735; full54 real-fit 0.4703.

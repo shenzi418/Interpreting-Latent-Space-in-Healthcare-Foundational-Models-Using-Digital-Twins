@@ -1,0 +1,24 @@
+{
+  "as_shipped": {
+    "label": "as_shipped        (MedalCare aVL/aVF SWAPPED, global z)",
+    "medalcare_train": "exp7_medalcare_train",
+    "medalcare_test": "exp7_medalcare",
+    "n_medalcare_test": 2198,
+    "n_ptbxl_test": 2198,
+    "c2st_auroc_cv": 1.0,
+    "c2st_auroc_heldout": 1.0,
+    "mmd2_multibandwidth_unbiased": 0.1756797781851599,
+    "knn_mixing_k10": 0.0026333333333333334
+  },
+  "leadfix": {
+    "label": "leadfix + perlead (MedalCare CORRECT order, per-lead z)",
+    "medalcare_train": "exp7_medalcare_train_unswapped_perlead",
+    "medalcare_test": "exp7_medalcare_unswapped_perlead",
+    "n_medalcare_test": 2198,
+    "n_ptbxl_test": 2198,
+    "c2st_auroc_cv": 1.0,
+    "c2st_auroc_heldout": 1.0,
+    "mmd2_multibandwidth_unbiased": 0.1447106404704937,
+    "knn_mixing_k10": 0.0109
+  }
+}
